@@ -2,7 +2,7 @@ const errorHandler = (err, req, res, next) => {
   console.error(err.stack);
 
   if (err.name === 'ValidationError') {
-    return res.status(400).json({ message: Object.values(err.errors).map(e => e.message) });
+    return res.status(400).json({ message: err.message });
   }
 
   if (err.name === 'CastError') {

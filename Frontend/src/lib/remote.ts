@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiClient, apiErrorMessage, USE_MOCK_API } from "./api-client";
-import { mockStore, type EnvVar, type LogLine, type ProjectFile } from "./store";
+import { apiClient, apiErrorMessage } from "./api-client";
+import { dataStore, type EnvVar, type LogLine, type ProjectFile } from "./store";
 
 /**
- * Real-API read layer. When USE_MOCK_API is false, pages call useRemote()
- * with the resources they need; data is fetched with GET requests and
- * written into the shared store, so screens render exactly as in mock mode.
+ * Read layer: pages call useRemote() with the resources they need; data is
+ * fetched with GET requests and written into the shared store.
  */
 
 /** MongoDB documents use `_id`; screens expect `id`. */
@@ -39,45 +38,45 @@ export async function loadResource(r: Resource): Promise<void> {
   switch (kind) {
     case "projects": {
       const { data } = await apiClient.get("/projects");
-      mockStore.hydrate(() => ({ projects: list(data, "projects") }));
+      dataStore.hydrate(() => ({ projects: list(data, "projects") }));
       return;
     }
     case "deployments": {
       const { data } = await apiClient.get("/deployments");
-      mockStore.hydrate(() => ({ deployments: list(data, "deployments") }));
+      dataStore.hydrate(() => ({ deployments: list(data, "deployments") }));
       return;
     }
     case "containers": {
       const { data } = await apiClient.get("/containers");
-      mockStore.hydrate(() => ({ containers: list(data, "containers") }));
+      dataStore.hydrate(() => ({ containers: list(data, "containers") }));
       return;
     }
     case "notifications": {
       const { data } = await apiClient.get("/notifications");
-      mockStore.hydrate(() => ({ notifications: list(data, "notifications") }));
+      dataStore.hydrate(() => ({ notifications: list(data, "notifications") }));
       return;
     }
     case "users": {
       const { data } = await apiClient.get("/admin/users");
-      mockStore.hydrate(() => ({ users: list(data, "users") }));
+      dataStore.hydrate(() => ({ users: list(data, "users") }));
       return;
     }
     case "env": {
       const { data } = await apiClient.get(`/projects/${id}/env`);
       const vars = rawList<EnvVar>(data, "vars");
-      mockStore.hydrate((s) => ({ envVars: { ...s.envVars, [id]: vars } }));
+      dataStore.hydrate((s) => ({ envVars: { ...s.envVars, [id]: vars } }));
       return;
     }
     case "files": {
       const { data } = await apiClient.get(`/projects/${id}/files`);
       const files = rawList<ProjectFile>(data, "files");
-      mockStore.hydrate((s) => ({ files: { ...s.files, [id]: files } }));
+      dataStore.hydrate((s) => ({ files: { ...s.files, [id]: files } }));
       return;
     }
     case "logs": {
       const { data } = await apiClient.get(`/deployments/${id}/logs`);
       const logs = rawList<LogLine>(data, "logs");
-      mockStore.hydrate((s) => ({ logs: { ...s.logs, [id]: logs } }));
+      dataStore.hydrate((s) => ({ logs: { ...s.logs, [id]: logs } }));
       return;
     }
   }
@@ -85,17 +84,16 @@ export async function loadResource(r: Resource): Promise<void> {
 
 /** Refetch several resources after a write (real-API mode only). */
 export async function refetch(...resources: Resource[]) {
-  if (USE_MOCK_API) return;
   await Promise.all(resources.map(loadResource));
 }
 
 export function useRemote(resources: Resource[]) {
   const key = resources.join("|");
-  const [loading, setLoading] = useState(!USE_MOCK_API);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const run = useCallback(async () => {
-    if (USE_MOCK_API || !key) return;
+    if (!key) return;
     setLoading(true);
     setError(null);
     try {
@@ -111,5 +109,5 @@ export function useRemote(resources: Resource[]) {
     void run();
   }, [run]);
 
-  return { loading: USE_MOCK_API ? false : loading, error, retry: run };
+  return { loading, error, retry: run };
 }

@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { DeploymentStatus } from "@/lib/mock-data";
+import type { DeploymentStatus } from "@/lib/types";
 
 const styles: Record<DeploymentStatus, string> = {
   running: "bg-success text-success-foreground",

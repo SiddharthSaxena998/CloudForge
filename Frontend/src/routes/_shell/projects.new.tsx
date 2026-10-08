@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { api } from "@/lib/api";
+import { attempt } from "@/lib/attempt";
 import type { SourceType } from "@/lib/store";
 
 export const Route = createFileRoute("/_shell/projects/new")({
@@ -48,15 +49,17 @@ function NewProjectPage() {
     setErrors(next);
     if (Object.keys(next).length) return;
     setSubmitting(true);
-    const project = await api.createProject({
+    const res = await attempt(api.createProject({
       name,
       description,
       sourceType,
       repo,
       branch: branch.trim(),
       archiveName: archive?.name ?? "",
-    });
-    navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
+    }));
+    setSubmitting(false);
+    if (!res.ok) return;
+    navigate({ to: "/projects/$projectId", params: { projectId: res.value.id } });
   }
 
   return (

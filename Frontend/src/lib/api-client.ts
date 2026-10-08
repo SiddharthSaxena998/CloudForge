@@ -1,11 +1,8 @@
 import axios from "axios";
-import { API_BASE_URL, USE_MOCK_API } from "@/config";
+import { API_BASE_URL } from "@/config";
 
-/**
- * USE_MOCK_API and API_BASE_URL live in src/config.ts — change them there.
- * Re-exported here so existing imports keep working.
- */
-export { API_BASE_URL, USE_MOCK_API };
+/** API_BASE_URL lives in src/config.ts. */
+export { API_BASE_URL };
 
 export const TOKEN_STORAGE_KEY = "cloudforge.token";
 export const USER_STORAGE_KEY = "cloudforge.user";
@@ -17,7 +14,7 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
-  if (!USE_MOCK_API && typeof window !== "undefined") {
+  if (typeof window !== "undefined") {
     const token = window.localStorage.getItem(TOKEN_STORAGE_KEY);
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -51,5 +48,3 @@ export function apiErrorMessage(error: unknown): string {
   }
   return error instanceof Error ? error.message : "Something went wrong. Please try again.";
 }
-
-export const mockDelay = (ms = 550) => new Promise((resolve) => setTimeout(resolve, ms));

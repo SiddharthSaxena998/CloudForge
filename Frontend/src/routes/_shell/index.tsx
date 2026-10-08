@@ -1,5 +1,6 @@
+import { RemoteGate } from "@/components/remote-gate";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { PageShell } from "@/components/page-shell";
+import { EmptyState, PageShell } from "@/components/page-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
@@ -38,7 +39,7 @@ function DashboardPage() {
   const containers = useStore((s) => s.containers);
   const deployments = useStore((s) => s.deployments);
 
-  const weekAgo = Date.parse("2026-09-23T00:00:00Z");
+  const weekAgo = Date.now() - 7 * 86400_000;
   const stats = [
     { label: "Total Projects", value: projects.length },
     { label: "Running Deployments", value: projects.filter((p) => p.status === "running").length },
@@ -55,6 +56,7 @@ function DashboardPage() {
       description={user ? `Signed in as ${user.email}` : undefined}
       action={<NewProjectButton />}
     >
+      <RemoteGate resources={["projects", "containers", "deployments"]}>
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
           <div key={stat.label} className="rounded-md border border-border bg-card p-4">
@@ -72,6 +74,9 @@ function DashboardPage() {
           <NewProjectButton variant="outline" />
         </div>
 
+        {projects.length === 0 && (
+          <EmptyState title="No projects yet" message="Create your first project to deploy it on CloudForge." />
+        )}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {projects.map((project) => (
             <article
@@ -104,6 +109,7 @@ function DashboardPage() {
           ))}
         </div>
       </section>
+      </RemoteGate>
     </PageShell>
   );
 }

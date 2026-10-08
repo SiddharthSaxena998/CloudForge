@@ -1,7 +1,7 @@
-import { apiClient, mockDelay, USE_MOCK_API } from "./api-client";
-import { mockStore, type Deployment, type EnvVar, type ProjectRecord, type SourceType } from "./store";
+import { apiClient } from "./api-client";
+import { type Deployment, type EnvVar, type ProjectRecord, type SourceType } from "./store";
 import { refetch } from "./remote";
-import type { Role } from "./mock-data";
+import type { Role } from "./types";
 
 const idOf = (x: unknown): string => {
   const o = (x ?? {}) as Record<string, unknown>;
@@ -10,8 +10,8 @@ const idOf = (x: unknown): string => {
 };
 
 /**
- * Mutation endpoints. With USE_MOCK_API false each call hits the Express API
- * and then refetches the affected data; otherwise it updates the mock store.
+ * Mutation endpoints: each call hits the Express API, then refetches the
+ * affected data from the server.
  * Errors are thrown so screens can show a message (see apiErrorMessage).
  */
 export const api = {
@@ -23,66 +23,39 @@ export const api = {
     branch: string;
     archiveName: string;
   }): Promise<Pick<ProjectRecord, "id">> {
-    if (!USE_MOCK_API) {
-      const { data } = await apiClient.post("/projects", input);
-      await refetch("projects", "deployments", "notifications");
-      return { id: idOf(data) };
-    }
-    await mockDelay();
-    return mockStore.createProject(input);
+    const { data } = await apiClient.post("/projects", input);
+    await refetch("projects", "deployments", "notifications");
+    return { id: idOf(data) };
   },
   async deployProject(projectId: string): Promise<Pick<Deployment, "id">> {
-    if (!USE_MOCK_API) {
-      const { data } = await apiClient.post(`/projects/${projectId}/deploy`);
-      await refetch("projects", "deployments", "notifications");
-      return { id: idOf(data) };
-    }
-    await mockDelay();
-    return mockStore.deployProject(projectId);
+    const { data } = await apiClient.post(`/projects/${projectId}/deploy`);
+    await refetch("projects", "deployments", "notifications");
+    return { id: idOf(data) };
   },
   async saveEnvVars(projectId: string, vars: EnvVar[]) {
-    if (!USE_MOCK_API) {
-      await apiClient.put(`/projects/${projectId}/env`, { vars });
-      await refetch(`env:${projectId}`);
-      return;
-    }
-    await mockDelay(350);
-    mockStore.saveEnvVars(projectId, vars);
+    await apiClient.put(`/projects/${projectId}/env`, { vars });
+    await refetch(`env:${projectId}`);
+    return;
   },
   async saveFile(projectId: string, path: string, content: string) {
-    if (!USE_MOCK_API) {
-      await apiClient.put(`/projects/${projectId}/files`, { path, content });
-      await refetch(`files:${projectId}`);
-      return;
-    }
-    await mockDelay(300);
-    mockStore.saveFile(projectId, path, content);
+    await apiClient.put(`/projects/${projectId}/files`, { path, content });
+    await refetch(`files:${projectId}`);
+    return;
   },
   async stopContainer(id: string) {
-    if (!USE_MOCK_API) {
-      await apiClient.post(`/containers/${id}/stop`);
-      await refetch("containers");
-      return;
-    }
-    await mockDelay(400);
-    mockStore.stopContainer(id);
+    await apiClient.post(`/containers/${id}/stop`);
+    await refetch("containers");
+    return;
   },
   async markAllNotificationsRead() {
-    if (!USE_MOCK_API) {
-      await apiClient.post("/notifications/read-all");
-      await refetch("notifications");
-      return;
-    }
-    mockStore.markAllRead();
+    await apiClient.post("/notifications/read-all");
+    await refetch("notifications");
+    return;
   },
   async updateUserRole(userId: string, role: Role) {
-    if (!USE_MOCK_API) {
-      await apiClient.patch(`/admin/users/${userId}`, { role });
-      await refetch("users");
-      return;
-    }
-    await mockDelay(350);
-    mockStore.updateUserRole(userId, role);
+    await apiClient.patch(`/admin/users/${userId}`, { role });
+    await refetch("users");
+    return;
   },
 };
 

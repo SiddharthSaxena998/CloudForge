@@ -119,7 +119,6 @@ const runDeploymentPipeline = async (deployment, project, socket) => {
     deployment.finishedAt = new Date();
     await deployment.save();
 
-    const project = await Project.findById(req.params.id);
     project.status = 'failed';
     await project.save();
 
@@ -244,13 +243,13 @@ exports.getDeploymentById = async (req, res, next) => {
       .populate('project', 'name owner')
       .populate('triggeredBy', 'name email');
 
-    if (!deployment) {
+    if (!deployment || !deployment.project) {
       return res.status(404).json({ message: 'Deployment not found' });
     }
 
     // Check ownership
     const project = await Project.findById(deployment.project._id);
-    if (project.owner.toString() !== req.user._id.toString()) {
+    if (!project || project.owner.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Access denied' });
     }
 
@@ -263,13 +262,13 @@ exports.getDeploymentById = async (req, res, next) => {
 exports.getDeploymentLogs = async (req, res, next) => {
   try {
     const deployment = await Deployment.findById(req.params.id);
-    if (!deployment) {
+    if (!deployment || !deployment.project) {
       return res.status(404).json({ message: 'Deployment not found' });
     }
 
     // Check ownership
     const project = await Project.findById(deployment.project._id);
-    if (project.owner.toString() !== req.user._id.toString()) {
+    if (!project || project.owner.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Access denied' });
     }
 

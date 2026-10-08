@@ -122,7 +122,7 @@ function AuthPage() {
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
               {mode === "login"
-                ? "Use admin@cloudforge.dev for the admin role in this demo."
+                ? "Sign in with your CloudForge account."
                 : "New accounts are created with the standard user role."}
             </p>
 

@@ -17,15 +17,16 @@ exports.getProjects = async (req, res, next) => {
 
 exports.createProject = async (req, res, next) => {
   try {
-    const { name, description, sourceType, repoUrl, branch } = req.body;
+    const { name, description, sourceType, repo, repoUrl: repoUrlBody, branch, archiveName } = req.body;
+    const finalRepoUrl = repo || repoUrlBody;
     let sourcePath = '';
     let framework = '';
 
     if (sourceType === 'github') {
-      if (!repoUrl) {
+      if (!finalRepoUrl) {
         return res.status(400).json({ message: 'GitHub repo URL is required' });
       }
-      sourcePath = await git.cloneRepo(repoUrl, name);
+      sourcePath = await git.cloneRepo(finalRepoUrl, name, branch);
     } else if (sourceType === 'upload') {
       if (!req.file) {
         return res.status(400).json({ message: 'Archive file is required' });
@@ -48,7 +49,7 @@ exports.createProject = async (req, res, next) => {
       name,
       description,
       sourceType,
-      repoUrl,
+      repoUrl: finalRepoUrl,
       branch,
       sourcePath,
       framework,
@@ -190,6 +191,34 @@ exports.saveFileContent = async (req, res, next) => {
 
     fs.writeFileSync(resolvedPath, req.body.content, 'utf-8');
     res.json({ path: req.body.path, success: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getEnvVars = async (req, res, next) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    res.json({ vars: project.envVars });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.updateEnvVars = async (req, res, next) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    project.envVars = req.body.vars || [];
+    await project.save();
+    res.json({ success: true });
   } catch (error) {
     next(error);
   }

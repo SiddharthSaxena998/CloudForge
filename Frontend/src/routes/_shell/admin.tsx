@@ -1,3 +1,5 @@
+import { RemoteGate } from "@/components/remote-gate";
+import { attempt } from "@/lib/attempt";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { EmptyState, PageShell } from "@/components/page-shell";
@@ -20,7 +22,7 @@ import {
 import { useAuth } from "@/context/auth";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import type { Role, User } from "@/lib/mock-data";
+import type { Role, User } from "@/lib/types";
 
 export const Route = createFileRoute("/_shell/admin")({
   head: () => ({
@@ -48,6 +50,7 @@ function AdminPage() {
 
   return (
     <PageShell title="Admin" description={`${users.length} users in this workspace`}>
+      <RemoteGate resources={["users"]}>
       <div className="rounded-md border border-border bg-card">
         <Table>
           <TableHeader>
@@ -63,9 +66,17 @@ function AdminPage() {
             {users.map((u) => (
               <UserRow key={u.id} user={u} />
             ))}
+            {users.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                  No users found.
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </div>
+      </RemoteGate>
     </PageShell>
   );
 }
@@ -108,8 +119,8 @@ function UserRow({ user }: { user: User }) {
             disabled={!dirty || state === "saving"}
             onClick={async () => {
               setState("saving");
-              await api.updateUserRole(user.id, role);
-              setState("saved");
+              const res = await attempt(api.updateUserRole(user.id, role));
+              setState(res.ok ? "saved" : "idle");
             }}
           >
             {state === "saving" ? "Saving" : "Save"}

@@ -1,3 +1,4 @@
+import { RemoteGate } from "@/components/remote-gate";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { ArrowLeft, Copy } from "lucide-react";
@@ -5,7 +6,7 @@ import { EmptyState, PageShell } from "@/components/page-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/api";
-import { buildLogs, useStore, type LogLevel } from "@/lib/store";
+import { useStore, type LogLevel } from "@/lib/store";
 
 export const Route = createFileRoute("/_shell/logs/$deploymentId")({
   head: () => ({
@@ -28,8 +29,17 @@ const levelClass: Record<LogLevel, string> = {
 
 function LogsPage() {
   const { deploymentId } = Route.useParams();
+  return (
+    <RemoteGate title="Deployment Logs" resources={["projects", "deployments", `logs:${deploymentId}`]}>
+      <LogsView deploymentId={deploymentId} />
+    </RemoteGate>
+  );
+}
+
+function LogsView({ deploymentId }: { deploymentId: string }) {
   const deployment = useStore((s) => s.deployments.find((d) => d.id === deploymentId));
   const project = useStore((s) => s.projects.find((p) => p.id === deployment?.projectId));
+  const logs = useStore((s) => s.logs[deploymentId] ?? []);
   const [copied, setCopied] = useState(false);
 
   if (!deployment) {
@@ -40,7 +50,6 @@ function LogsPage() {
     );
   }
 
-  const logs = buildLogs(deployment, project);
   const connected = deployment.status === "building" || deployment.status === "running";
 
   async function copy() {
@@ -79,6 +88,7 @@ function LogsPage() {
         </span>
       </div>
       <div className="overflow-x-auto rounded-md border border-border bg-terminal p-4 font-mono text-xs leading-6">
+        {logs.length === 0 && <p className="text-terminal-foreground/60">No log output for this deployment yet.</p>}
         {logs.map((l, i) => (
           <div key={i} className="flex gap-3 whitespace-pre">
             <span className="select-none text-terminal-foreground/50">{l.time}</span>

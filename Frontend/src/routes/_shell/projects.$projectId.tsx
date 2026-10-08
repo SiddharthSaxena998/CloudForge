@@ -1,3 +1,5 @@
+import { RemoteGate } from "@/components/remote-gate";
+import { attempt } from "@/lib/attempt";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { FileCode2, FileText, Folder, Plus, Trash2 } from "lucide-react";
@@ -33,6 +35,14 @@ export const Route = createFileRoute("/_shell/projects/$projectId")({
 
 function ProjectDetailPage() {
   const { projectId } = Route.useParams();
+  return (
+    <RemoteGate title="Project" resources={["projects", "deployments", `env:${projectId}`, `files:${projectId}`]}>
+      <ProjectDetail projectId={projectId} />
+    </RemoteGate>
+  );
+}
+
+function ProjectDetail({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.projects.find((p) => p.id === projectId));
   const [deploying, setDeploying] = useState(false);
 
@@ -62,7 +72,7 @@ function ProjectDetailPage() {
           disabled={deploying}
           onClick={async () => {
             setDeploying(true);
-            await api.deployProject(project.id);
+            await attempt(api.deployProject(project.id));
             setDeploying(false);
           }}
         >
@@ -142,9 +152,10 @@ function EnvEditor({ projectId }: { projectId: string }) {
   async function save() {
     const clean = rows.filter((r) => r.key.trim());
     setSaving(true);
-    await api.saveEnvVars(projectId, clean);
-    setRows(clean);
+    const res = await attempt(api.saveEnvVars(projectId, clean));
     setSaving(false);
+    if (!res.ok) return;
+    setRows(clean);
     setMessage(`Saved ${clean.length} variable${clean.length === 1 ? "" : "s"}. Changes apply on the next deploy.`);
   }
 
@@ -242,15 +253,17 @@ function FilesPanel({ projectId }: { projectId: string }) {
       setStatus(path ? "A file with that name already exists." : "Enter a file name.");
       return;
     }
-    await api.saveFile(projectId, path, "");
+    const res = await attempt(api.saveFile(projectId, path, ""));
+    if (!res.ok) return;
     setNewName("");
     setSelected(path);
   }
 
   async function save() {
     setSaving(true);
-    await api.saveFile(projectId, selected, draft);
+    const res = await attempt(api.saveFile(projectId, selected, draft));
     setSaving(false);
+    if (!res.ok) return;
     setStatus(`Saved ${selected}`);
   }
 

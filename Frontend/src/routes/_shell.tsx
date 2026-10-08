@@ -5,6 +5,7 @@ import { ShellMenuContext } from "@/components/page-shell";
 import { PageLoader } from "@/components/loading-spinner";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/context/auth";
+import { loadResource } from "@/lib/remote";
 
 export const Route = createFileRoute("/_shell")({
   component: ShellLayout,
@@ -21,6 +22,11 @@ function ShellLayout() {
       navigate({ to: "/login", replace: true });
     }
   }, [isLoading, isAuthenticated, navigate]);
+
+  // Unread badge in the sidebar: load notifications once signed in (errors are shown on the page itself).
+  useEffect(() => {
+    if (isAuthenticated) loadResource("notifications").catch(() => {});
+  }, [isAuthenticated]);
 
   if (isLoading || !isAuthenticated) {
     return <PageLoader label="Checking session" />;

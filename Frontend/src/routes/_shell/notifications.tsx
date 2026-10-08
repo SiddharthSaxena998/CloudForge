@@ -1,3 +1,5 @@
+import { RemoteGate } from "@/components/remote-gate";
+import { attempt } from "@/lib/attempt";
 import { createFileRoute } from "@tanstack/react-router";
 import { CheckCircle2, Info, XCircle } from "lucide-react";
 import { PageShell } from "@/components/page-shell";
@@ -29,18 +31,22 @@ function NotificationsPage() {
 
   return (
     <PageShell title="Notifications" description={`${unread} unread`}>
+      <RemoteGate resources={["notifications"]}>
       <div className="max-w-3xl rounded-md border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2">
           <span className="text-xs uppercase tracking-wide text-muted-foreground">Recent activity</span>
           <button
             type="button"
             disabled={unread === 0}
-            onClick={() => api.markAllNotificationsRead()}
+            onClick={() => void attempt(api.markAllNotificationsRead())}
             className="text-sm text-primary hover:underline disabled:pointer-events-none disabled:text-muted-foreground"
           >
             Mark all as read
           </button>
         </div>
+        {items.length === 0 && (
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">No notifications yet.</p>
+        )}
         <ul className="divide-y divide-border">
           {items.map((n) => {
             const { Icon, className } = icons[n.kind];
@@ -57,6 +63,7 @@ function NotificationsPage() {
           })}
         </ul>
       </div>
+      </RemoteGate>
     </PageShell>
   );
 }

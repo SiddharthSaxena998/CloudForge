@@ -20,4 +20,8 @@ router.get('/:id/files', ownershipCheck, projectController.getProjectFiles);
 router.get('/:id/files/content', ownershipCheck, projectController.getFileContent);
 router.put('/:id/files/content', ownershipCheck, projectController.saveFileContent);
 
+// Env vars
+router.get('/:id/env', ownershipCheck, projectController.getEnvVars);
+router.put('/:id/env', ownershipCheck, projectController.updateEnvVars);
+
 module.exports = router;

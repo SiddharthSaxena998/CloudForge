@@ -17,6 +17,35 @@ exports.getContainers = async (req, res, next) => {
   }
 };
 
+exports.stopContainer = async (req, res, next) => {
+  try {
+    const container = await Container.findById(req.params.id);
+    if (!container) {
+      return res.status(404).json({ message: 'Container not found' });
+    }
+
+    // Update status first
+    container.status = 'stopped';
+    await container.save();
+
+    await stopContainer(container.containerId);
+
+    // Broadcast stop event
+    if (global.io) {
+      global.io.to('containers').emit('container-stats-update', {
+        containerId: container._id,
+        status: 'stopped',
+        cpuUsagePercent: 0,
+        memoryUsageMB: 0
+      });
+    }
+
+    res.json({ success: true, message: 'Container stopped' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getContainerStats = async (req, res, next) => {
   try {
     const container = await Container.findById(req.params.id);

@@ -1,3 +1,5 @@
+import { RemoteGate } from "@/components/remote-gate";
+import { attempt } from "@/lib/attempt";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { ExternalLink, Search } from "lucide-react";
@@ -53,6 +55,7 @@ function ContainersPage() {
 
   return (
     <PageShell title="Containers" description="Runtime instances across all projects">
+      <RemoteGate resources={["containers", "projects"]}>
       <div className="relative mb-3 max-w-sm">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -119,7 +122,7 @@ function ContainersPage() {
                         disabled={!active || stopping === c.id}
                         onClick={async () => {
                           setStopping(c.id);
-                          await api.stopContainer(c.id);
+                          await attempt(api.stopContainer(c.id));
                           setStopping(null);
                         }}
                       >
@@ -133,13 +136,14 @@ function ContainersPage() {
             {rows.length === 0 && (
               <TableRow>
                 <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
-                  No containers match "{query}".
+                  {query.trim() ? `No containers match "${query}".` : "No containers yet."}
                 </TableCell>
               </TableRow>
             )}
           </TableBody>
         </Table>
       </div>
+      </RemoteGate>
     </PageShell>
   );
 }

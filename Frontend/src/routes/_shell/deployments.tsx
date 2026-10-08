@@ -1,9 +1,10 @@
+import { RemoteGate } from "@/components/remote-gate";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { EmptyState, PageShell } from "@/components/page-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { formatDate } from "@/lib/api";
-import type { DeploymentStatus } from "@/lib/mock-data";
+import type { DeploymentStatus } from "@/lib/types";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +42,7 @@ function DeploymentsPage() {
       title="Deployments"
       description="Build and release history across all projects"
     >
+      <RemoteGate resources={["deployments", "projects"]}>
       <div className="flex flex-wrap items-center gap-1.5">
         {filters.map((f) => (
           <button
@@ -122,6 +124,7 @@ function DeploymentsPage() {
           </table>
         </div>
       )}
+      </RemoteGate>
     </PageShell>
   );
 }

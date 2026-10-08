@@ -7,6 +7,8 @@ const jwt = require('jsonwebtoken');
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
 const deploymentRoutes = require('./routes/deployments');
+const notificationRoutes = require('./routes/notifications');
+const containerRoutes = require('./routes/containers');
 const errorHandler = require('./middleware/error-handler');
 const Notification = require('./models/Notification');
 const User = require('./models/User');
@@ -51,8 +53,10 @@ io.on('connection', (socket) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/deployments', deploymentRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/containers', containerRoutes);
 
-// Helper middleware for inline routes
+// Helper middleware for inline admin routes
 function authenticateInline(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -75,44 +79,26 @@ function roleCheckAdmin(req, res, next) {
   }
 }
 
-// Notifications
-app.get('/api/notifications', authenticateInline, async (req, res) => {
-  try {
-    const notifications = await Notification.find({ user: req.user._id })
-      .sort({ createdAt: -1 })
-      .limit(50);
-    res.json(notifications);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-app.post('/api/notifications/mark-all-read', authenticateInline, async (req, res) => {
-  try {
-    await Notification.updateMany({ user: req.user._id, read: false }, { read: true });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Admin
-app.get('/api/admin/users', authenticateInline, roleCheckAdmin, async (req, res) => {
+// Admin routes (inline for now)
+app.get('/api/admin/users', authenticateInline, roleCheckAdmin, async (req, res, next) => {
   try {
     const users = await User.find().select('-password');
     res.json(users);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    next(error);
   }
 });
 
-app.put('/api/admin/users/:id/role', authenticateInline, roleCheckAdmin, async (req, res) => {
+app.patch('/api/admin/users/:id', authenticateInline, roleCheckAdmin, async (req, res, next) => {
   try {
     const { role } = req.body;
-    await User.findByIdAndUpdate(req.params.id, { role });
-    res.json({ success: true });
+    const user = await User.findByIdAndUpdate(req.params.id, { role }, { new: true }).select('-password');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    next(error);
   }
 });
 
@@ -123,8 +109,14 @@ const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI);
-    console.log('MongoDB Connected');
+    console.log('Attempting to connect to MongoDB...');
+    console.log('MONGO_URI type:', process.env.MONGO_URI.startsWith('mongodb+srv://') ? 'Atlas (mongodb+srv://)' : 'Local/Other');
+
+    await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 10000,
+    });
+    console.log('MongoDB Connected successfully');
 
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
@@ -141,3 +133,5 @@ const startServer = async () => {
 };
 
 module.exports = { app, server, io, startServer };
+
+startServer();
