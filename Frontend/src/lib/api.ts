@@ -5,8 +5,8 @@ import type { Role } from "./types";
 
 const idOf = (x: unknown): string => {
   const o = (x ?? {}) as Record<string, unknown>;
-  const inner = (o['project'] ?? o['deployment'] ?? o) as Record<string, unknown>;
-  return String(inner['id'] ?? inner['_id'] ?? "");
+  const inner = (o["project"] ?? o["deployment"] ?? o) as Record<string, unknown>;
+  return String(inner["id"] ?? inner["_id"] ?? "");
 };
 
 /**
@@ -21,9 +21,20 @@ export const api = {
     sourceType: SourceType;
     repo: string;
     branch: string;
-    archiveName: string;
+    archive: File | null;
   }): Promise<Pick<ProjectRecord, "id">> {
-    const { data } = await apiClient.post("/projects", input);
+    // Backend multer (upload.single('archive')) use karta hai, isliye FormData
+    const fd = new FormData();
+    fd.append("name", input.name);
+    fd.append("description", input.description);
+    fd.append("sourceType", input.sourceType);
+    if (input.sourceType === "github") {
+      fd.append("repo", input.repo);
+      fd.append("branch", input.branch);
+    } else if (input.archive) {
+      fd.append("archive", input.archive);
+    }
+    const { data } = await apiClient.post("/projects", fd);
     await refetch("projects", "deployments", "notifications");
     return { id: idOf(data) };
   },
@@ -38,7 +49,8 @@ export const api = {
     return;
   },
   async saveFile(projectId: string, path: string, content: string) {
-    await apiClient.put(`/projects/${projectId}/files`, { path, content });
+    // backend route: PUT /projects/:id/files/content
+    await apiClient.put(`/projects/${projectId}/files/content`, { path, content });
     await refetch(`files:${projectId}`);
     return;
   },

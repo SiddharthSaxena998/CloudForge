@@ -25,6 +25,8 @@ export const Route = createFileRoute("/_shell/projects/new")({
 
 type Errors = Partial<Record<"name" | "repo" | "branch" | "archive", string>>;
 
+const ARCHIVE_RE = /\.(zip|tar\.gz|tgz)$/i;
+
 function NewProjectPage() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -45,18 +47,24 @@ function NewProjectPage() {
       if (!/^(https?:\/\/)?github\.com\/[\w.-]+\/[\w.-]+/.test(repo))
         next.repo = "Enter a GitHub URL, e.g. https://github.com/org/repo";
       if (!branch.trim()) next.branch = "Branch is required.";
-    } else if (!archive) next.archive = "Select a .zip or .tar.gz archive.";
+    } else if (!archive) {
+      next.archive = "Select a .zip or .tar.gz archive.";
+    } else if (!ARCHIVE_RE.test(archive.name)) {
+      next.archive = "Only .zip, .tar.gz or .tgz files are supported.";
+    }
     setErrors(next);
     if (Object.keys(next).length) return;
     setSubmitting(true);
-    const res = await attempt(api.createProject({
-      name,
-      description,
-      sourceType,
-      repo,
-      branch: branch.trim(),
-      archiveName: archive?.name ?? "",
-    }));
+    const res = await attempt(
+      api.createProject({
+        name,
+        description,
+        sourceType,
+        repo,
+        branch: branch.trim(),
+        archive,
+      }),
+    );
     setSubmitting(false);
     if (!res.ok) return;
     navigate({ to: "/projects/$projectId", params: { projectId: res.value.id } });
