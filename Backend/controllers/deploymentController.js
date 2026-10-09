@@ -5,7 +5,7 @@ const Project = require('../models/Project');
 const Deployment = require('../models/Deployment');
 const Container = require('../models/Container');
 const Log = require('../models/Log');
-const { run, buildImage, getFreePort } = require('../utils/docker');
+const { buildImage, runContainer, getFreePort } = require('../utils/docker');
 const { sendNotification } = require('../utils/notify');
 const { detectFramework } = require('../utils/frameworkDetector');
 
@@ -26,22 +26,38 @@ const getCommit = (dir) =>
     );
   });
 
-// Dockerfile + container ka internal port (nginx 80 par sunta hai)
-const DOCKERFILES = {
-  'Node.js': {
-    port: 3000,
-    text: `FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm install --production
-COPY . .
-EXPOSE 3000
-CMD ["node", "index.js"]
-`,
-  },
-  React: {
-    port: 80,
-    text: `FROM node:18-alpine AS builder
+// ---------- app folder detection ----------
+const MANIFESTS = ['package.json', 'requirements.txt', 'go.mod', 'manage.py', 'index.html'];
+const PREFERRED_SUBDIRS = ['backend', 'server', 'api', 'app', 'frontend', 'client', 'web'];
+const SKIP = new Set(['.git', 'node_modules']);
+
+const hasManifest = (dir) => MANIFESTS.some((f) => fs.existsSync(path.join(dir, f)));
+
+// repo root mein manifest nahi hai to subfolder mein dhundho
+const findAppDir = (root) => {
+  if (hasManifest(root)) return root;
+  for (const sub of PREFERRED_SUBDIRS) {
+    const d = path.join(root, sub);
+    if (fs.existsSync(d) && fs.statSync(d).isDirectory() && hasManifest(d)) return d;
+  }
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || SKIP.has(entry.name)) continue;
+    const d = path.join(root, entry.name);
+    if (hasManifest(d)) return d;
+  }
+  return root;
+};
+
+const readPkg = (dir) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf-8'));
+  } catch {
+    return null;
+  }
+};
+
+// ---------- Dockerfiles ----------
+const staticBuild = (outDir) => `FROM node:18-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
@@ -49,11 +65,26 @@ COPY . .
 RUN npm run build
 
 FROM nginx:alpine
-COPY --from=builder /app/build /usr/share/nginx/html
+COPY --from=builder /app/${outDir} /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
-`,
-  },
+`;
+
+const nodeApp = (pkg) => {
+  let cmd = '["npm", "start"]';
+  if (!pkg?.scripts?.start) cmd = `["node", "${pkg?.main || 'index.js'}"]`;
+  return `FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --omit=dev
+COPY . .
+ENV PORT=3000
+EXPOSE 3000
+CMD ${cmd}
+`;
+};
+
+const DOCKERFILES = {
   'Python Flask': {
     port: 3000,
     text: `FROM python:3.11-slim
@@ -99,24 +130,28 @@ CMD ["nginx", "-g", "daemon off;"]
 `,
   },
 };
-const DEFAULT_DOCKERFILE = {
-  port: 3000,
-  text: `FROM node:18-alpine
-WORKDIR /app
-COPY . .
-EXPOSE 3000
-CMD ["npm", "start"]
-`,
+
+// framework + folder ke hisaab se Dockerfile likho, container port return karo
+const generateDockerfile = (appDir, framework) => {
+  const pkg = readPkg(appDir);
+  const deps = { ...(pkg?.dependencies || {}), ...(pkg?.devDependencies || {}) };
+  let cfg;
+
+  if (framework === 'React' || deps['react-scripts']) {
+    cfg = { port: 80, text: staticBuild('build') };
+  } else if (pkg && deps['vite'] && !pkg.scripts?.start) {
+    cfg = { port: 80, text: staticBuild('dist') };
+  } else if (pkg) {
+    cfg = { port: 3000, text: nodeApp(pkg) };
+  } else {
+    cfg = DOCKERFILES[framework] || { port: 3000, text: nodeApp(null) };
+  }
+
+  fs.writeFileSync(path.join(appDir, 'Dockerfile'), cfg.text);
+  return { containerPort: cfg.port };
 };
 
-const generateDockerfile = (sourcePath, framework) => {
-  const cfg = DOCKERFILES[framework] || DEFAULT_DOCKERFILE;
-  const dockerfilePath = path.join(sourcePath, 'Dockerfile');
-  fs.writeFileSync(dockerfilePath, cfg.text);
-  return { dockerfilePath, containerPort: cfg.port };
-};
-
-// deployment tabhi milega jab uska project current user ka ho (warna 404, existence leak nahi hota)
+// deployment tabhi milega jab uska project current user ka ho
 const findOwnedDeployment = async (req) => {
   const deployment = await Deployment.findById(req.params.id);
   if (!deployment) return null;
@@ -134,25 +169,34 @@ const runDeploymentPipeline = async (deployment, project) => {
     deployment.status = 'building';
     await deployment.save();
 
-    const framework = project.framework || detectFramework(project.sourcePath) || 'Node.js';
+    const appDir = findAppDir(project.sourcePath);
+    const relDir = path.relative(project.sourcePath, appDir) || '.';
+    await emitLog(deploymentId, 'info', `App folder: ${relDir}`);
+    if (!hasManifest(appDir)) {
+      throw new Error('No package.json, requirements.txt, go.mod or index.html found in the repository.');
+    }
+
+    const framework = detectFramework(appDir) || 'Node.js';
     await emitLog(deploymentId, 'info', `Detected framework: ${framework}`);
 
-    const { dockerfilePath, containerPort } = generateDockerfile(project.sourcePath, framework);
+    const { containerPort } = generateDockerfile(appDir, framework);
     await emitLog(deploymentId, 'info', 'Dockerfile generated');
 
-    await emitLog(deploymentId, 'info', 'Building Docker image...');
-    await run(dockerfilePath, deployment.imageTag); // utils/docker.js dekhna zaroori hai, neeche note hai
+    await emitLog(deploymentId, 'info', 'Building Docker image (first build can take a few minutes)...');
+    await buildImage(deployment.imageTag, appDir);
     await emitLog(deploymentId, 'success', 'Docker image built successfully');
 
     await emitLog(deploymentId, 'info', 'Starting container...');
-    const envVars = (project.envVars || []).reduce((acc, ev) => {
+    const userEnv = (project.envVars || []).reduce((acc, ev) => {
       acc[ev.key] = ev.value;
       return acc;
     }, {});
+    // app container ke andar wahi port sune jo hum map kar rahe hain
+    const envVars = { ...userEnv, PORT: String(containerPort) };
 
     const hostPort = await getFreePort();
     const containerName = `${project.name}-${String(deploymentId).slice(0, 8)}`;
-    const containerResult = await buildImage(
+    const containerResult = await runContainer(
       deployment.imageTag,
       containerName,
       envVars,
@@ -178,7 +222,7 @@ const runDeploymentPipeline = async (deployment, project) => {
     await deployment.save();
     await setProject({ status: 'running', lastDeployedAt: new Date(), framework });
 
-    await emitLog(deploymentId, 'success', `Deployment successful! Container running on port ${hostPort}`);
+    await emitLog(deploymentId, 'success', `Deployment successful! Open http://localhost:${hostPort}`);
     await sendNotification(deployment.triggeredBy, `Project ${project.name} deployed successfully!`, 'success');
   } catch (error) {
     console.error('Deployment failed:', error);

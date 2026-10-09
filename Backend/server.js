@@ -4,16 +4,18 @@ const http = require('http');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const jwt = require('jsonwebtoken');
+
+dotenv.config();
+
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
 const deploymentRoutes = require('./routes/deployments');
 const notificationRoutes = require('./routes/notifications');
 const containerRoutes = require('./routes/containers');
 const errorHandler = require('./middleware/error-handler');
-const Notification = require('./models/Notification');
 const User = require('./models/User');
-
-dotenv.config();
+const Project = require('./models/Project');
+const Deployment = require('./models/Deployment');
 
 const app = express();
 const server = http.createServer(app);
@@ -27,8 +29,8 @@ app.use(express.urlencoded({ extended: true }));
 const io = require('socket.io')(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST']
-  }
+    methods: ['GET', 'POST'],
+  },
 });
 
 global.io = io;
@@ -117,6 +119,14 @@ const startServer = async () => {
       socketTimeoutMS: 10000,
     });
     console.log('MongoDB Connected successfully');
+
+    // Restart ke beech atke hue deployments ko failed mark karo,
+    // warna project hamesha "building" rahega aur naya deploy 409 dega
+    await Project.updateMany({ status: 'building' }, { $set: { status: 'failed' } });
+    await Deployment.updateMany(
+      { status: { $in: ['pending', 'building'] } },
+      { $set: { status: 'failed', errorMessage: 'Server restarted during deployment' } }
+    );
 
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

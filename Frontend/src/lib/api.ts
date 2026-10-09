@@ -10,6 +10,24 @@ const idOf = (x: unknown): string => {
 };
 
 /**
+ * Deploy background mein chalta hai (backend 202 deta hai), isliye
+ * jab tak status "building" hai, har 3 second mein data refetch karte rehte hain.
+ * Max ~3 minute, uske baad ruk jata hai.
+ */
+async function pollDeployment(deploymentId: string) {
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    try {
+      const { data } = await apiClient.get(`/deployments/${deploymentId}`);
+      await refetch("projects", "deployments", "containers", "notifications");
+      if (data?.status !== "building") return;
+    } catch {
+      return;
+    }
+  }
+}
+
+/**
  * Mutation endpoints: each call hits the Express API, then refetches the
  * affected data from the server.
  * Errors are thrown so screens can show a message (see apiErrorMessage).
@@ -40,8 +58,10 @@ export const api = {
   },
   async deployProject(projectId: string): Promise<Pick<Deployment, "id">> {
     const { data } = await apiClient.post(`/projects/${projectId}/deploy`);
-    await refetch("projects", "deployments", "notifications");
-    return { id: idOf(data) };
+    const id = idOf(data);
+    await refetch("projects", "deployments", "containers", "notifications");
+    if (id) void pollDeployment(id); // background mein status follow karo
+    return { id };
   },
   async saveEnvVars(projectId: string, vars: EnvVar[]) {
     await apiClient.put(`/projects/${projectId}/env`, { vars });
@@ -56,7 +76,7 @@ export const api = {
   },
   async stopContainer(id: string) {
     await apiClient.post(`/containers/${id}/stop`);
-    await refetch("containers");
+    await refetch("containers", "projects", "deployments");
     return;
   },
   async markAllNotificationsRead() {
@@ -71,7 +91,8 @@ export const api = {
   },
 };
 
-export function formatDate(iso: string) {
+export function formatDate(iso: string | null | undefined) {
+  if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
