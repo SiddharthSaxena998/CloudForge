@@ -2,3 +2,4 @@ node_modules/
 Backend/node_modules/
 Frontend/node_modules/
 .DS_Store
+node_modules/
