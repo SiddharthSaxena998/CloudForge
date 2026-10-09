@@ -29,6 +29,10 @@ export interface Deployment {
   source: string;
   commit: string;
   durationSec: number;
+
+  // Deployed app ports
+  hostPort: number | null;
+  containerPort: number | null;
 }
 export interface Container {
   id: string;
@@ -37,7 +41,7 @@ export interface Container {
   status: DeploymentStatus;
   cpu: number;
   memoryMb: number;
-  memoryLimitMb: number;
+  memoryLimitMb: number | null;
   url: string;
 }
 export type NotificationKind = "success" | "failure" | "info";

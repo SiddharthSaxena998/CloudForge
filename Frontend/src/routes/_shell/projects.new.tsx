@@ -56,15 +56,15 @@ function NewProjectPage() {
     if (Object.keys(next).length) return;
     setSubmitting(true);
     const res = await attempt(
-      api.createProject({
-        name,
-        description,
-        sourceType,
-        repo,
-        branch: branch.trim(),
-        archive,
-      }),
-    );
+  api.createProject({
+    name,
+    description,
+    sourceType,
+    repo,
+    branch: branch.trim(),
+    archive,
+  })
+);
     setSubmitting(false);
     if (!res.ok) return;
     navigate({ to: "/projects/$projectId", params: { projectId: res.value.id } });

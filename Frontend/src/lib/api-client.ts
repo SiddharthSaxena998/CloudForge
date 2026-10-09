@@ -9,7 +9,7 @@ export const USER_STORAGE_KEY = "cloudforge.user";
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  headers: { "Content-Type": "application/json" },
+ 
   timeout: 15000,
 });
 
