@@ -135,7 +135,23 @@ export const api = {
       `/containers/${id}/stop`
     );
 
+    await refetch("containers", "deployments", "projects");
+
+    return;
+  },
+
+  async deleteContainer(id: string) {
+    await apiClient.delete(`/containers/${id}`);
+
     await refetch("containers");
+
+    return;
+  },
+
+  async deleteProject(id: string) {
+    await apiClient.delete(`/projects/${id}`);
+
+    await refetch("projects", "deployments", "containers");
 
     return;
   },

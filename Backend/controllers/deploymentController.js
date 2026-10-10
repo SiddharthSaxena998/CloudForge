@@ -1,3 +1,4 @@
+
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
@@ -11,6 +12,7 @@ const {
   buildImage,
   runContainer,
   getFreePort,
+  isContainerRunning,
 } = require('../utils/docker');
 
 const { sendNotification } = require('../utils/notify');
@@ -26,8 +28,8 @@ const emitLog = async (deploymentId, level, message) => {
       message,
       timestamp: new Date(),
     });
-  } catch (e) {
-    console.error('Log save failed:', e.message);
+  } catch (error) {
+    console.error('Log save failed:', error.message);
   }
 };
 
@@ -38,38 +40,56 @@ const getCommit = (dir) =>
     execFile(
       'git',
       ['-C', dir, 'rev-parse', '--short', 'HEAD'],
-      (err, out) => {
-        resolve(err ? '' : out.trim());
-      }
+      (error, output) => resolve(error ? '' : output.trim())
     );
   });
 
 // ---------- Dockerfiles ----------
 
 const DOCKERFILES = {
-  'Node.js': {
+  'Next.js': {
     port: 3000,
-    text: `FROM node:18-alpine
+    text: `FROM node:22-alpine
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --production
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY . .
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
+RUN npm run build
 EXPOSE 3000
-CMD ["node", "index.js"]
+CMD ["npm", "start"]
+`,
+  },
+
+  'Node.js': {
+    port: 3000,
+    text: `FROM node:22-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+COPY . .
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=3000
+EXPOSE 3000
+CMD ["npm", "start"]
 `,
   },
 
   React: {
     port: 80,
-    text: `FROM node:18-alpine AS builder
+    text: `FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY . .
 RUN npm run build
 
 FROM nginx:alpine
-COPY --from=builder /app/build /usr/share/nginx/html
+COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 `,
@@ -82,6 +102,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
+ENV HOST=0.0.0.0
 EXPOSE 3000
 CMD ["python", "app.py"]
 `,
@@ -101,7 +122,7 @@ CMD ["python", "manage.py", "runserver", "0.0.0.0:3000"]
 
   Go: {
     port: 3000,
-    text: `FROM golang:1.21-alpine AS builder
+    text: `FROM golang:1.22-alpine AS builder
 WORKDIR /app
 COPY . .
 RUN go build -o main .
@@ -124,26 +145,33 @@ CMD ["nginx", "-g", "daemon off;"]
   },
 };
 
-const DEFAULT_DOCKERFILE = {
-  port: 3000,
-  text: `FROM node:18-alpine
-WORKDIR /app
-COPY . .
-EXPOSE 3000
-CMD ["npm", "start"]
-`,
-};
+const generateDockerfile = (sourcePath, framework, buildArgNames = []) => {
+  const config = DOCKERFILES[framework];
 
-const generateDockerfile = (sourcePath, framework) => {
-  const cfg = DOCKERFILES[framework] || DEFAULT_DOCKERFILE;
+  if (!config) {
+    throw new Error(
+      `Unsupported framework "${framework}". Cannot generate a safe Dockerfile.`
+    );
+  }
 
   const dockerfilePath = path.join(sourcePath, 'Dockerfile');
-
-  fs.writeFileSync(dockerfilePath, cfg.text);
+  const safeBuildArgNames = framework === 'Next.js'
+    ? buildArgNames.filter((key) => /^NEXT_PUBLIC_[A-Z0-9_]+$/.test(key))
+    : [];
+  const buildArgDeclarations = safeBuildArgNames
+    .map((key) => `ARG ${key}`)
+    .join('\n');
+  const dockerfileText = buildArgDeclarations
+    ? config.text.replace(
+        'RUN npm run build',
+        `${buildArgDeclarations}\nRUN npm run build`
+      )
+    : config.text;
+  fs.writeFileSync(dockerfilePath, dockerfileText);
 
   return {
     dockerfilePath,
-    containerPort: cfg.port,
+    containerPort: config.port,
   };
 };
 
@@ -152,9 +180,7 @@ const generateDockerfile = (sourcePath, framework) => {
 const findOwnedDeployment = async (req) => {
   const deployment = await Deployment.findById(req.params.id);
 
-  if (!deployment) {
-    return null;
-  }
+  if (!deployment) return null;
 
   const owns = await Project.exists({
     _id: deployment.project,
@@ -175,8 +201,9 @@ const runDeploymentPipeline = async (deployment, project) => {
       { $set: patch }
     );
 
+  let containerResult = null;
+
   try {
-    // 1. Start deployment
     await emitLog(
       deploymentId,
       'info',
@@ -186,11 +213,8 @@ const runDeploymentPipeline = async (deployment, project) => {
     deployment.status = 'building';
     await deployment.save();
 
-    // 2. Detect framework
-    const framework =
-      project.framework ||
-      detectFramework(project.sourcePath) ||
-      'Node.js';
+    // Detect framework from actual source, not stale DB metadata.
+    const framework = detectFramework(project.sourcePath);
 
     await emitLog(
       deploymentId,
@@ -198,22 +222,30 @@ const runDeploymentPipeline = async (deployment, project) => {
       `Detected framework: ${framework}`
     );
 
-    // 3. Generate Dockerfile
-    const {
-      dockerfilePath,
-      containerPort,
-    } = generateDockerfile(
-      project.sourcePath,
-      framework
+    const envVars = (project.envVars || []).reduce(
+      (acc, variable) => {
+        acc[variable.key] = variable.value;
+        return acc;
+      },
+      {}
     );
+    const buildArgs = framework === 'Next.js'
+      ? Object.fromEntries(
+          Object.entries(envVars).filter(([key]) =>
+            /^NEXT_PUBLIC_[A-Z0-9_]+$/.test(key)
+          )
+        )
+      : {};
+
+    const { dockerfilePath, containerPort } =
+      generateDockerfile(project.sourcePath, framework, Object.keys(buildArgs));
 
     await emitLog(
       deploymentId,
       'info',
-      'Dockerfile generated'
+      `Dockerfile generated for ${framework}`
     );
 
-    // 4. Build Docker image
     await emitLog(
       deploymentId,
       'info',
@@ -223,7 +255,11 @@ const runDeploymentPipeline = async (deployment, project) => {
     await buildImage(
       deployment.imageTag,
       project.sourcePath,
-      path.basename(dockerfilePath)
+      path.basename(dockerfilePath),
+      (line) => {
+        void emitLog(deploymentId, 'info', line);
+      },
+      buildArgs
     );
 
     await emitLog(
@@ -232,44 +268,67 @@ const runDeploymentPipeline = async (deployment, project) => {
       'Docker image built successfully'
     );
 
-    // 5. Prepare environment variables
+    // Ensure Next.js binds to the container interface.
+    if (framework === 'Next.js') {
+      envVars.HOSTNAME = '0.0.0.0';
+      envVars.PORT = '3000';
+      envVars.NODE_ENV = 'production';
+    }
+
     await emitLog(
       deploymentId,
       'info',
       'Starting container...'
     );
 
-    const envVars = (project.envVars || []).reduce(
-      (acc, ev) => {
-        acc[ev.key] = ev.value;
-        return acc;
-      },
-      {}
-    );
-
-    // 6. Find free host port
     const hostPort = await getFreePort();
+
     deployment.hostPort = hostPort;
-deployment.containerPort = containerPort;
-await deployment.save();
+    deployment.containerPort = containerPort;
+    await deployment.save();
 
-    // 7. Create unique container name
     const containerName =
-      `${project.name}-${String(deploymentId).slice(0, 8)}`;
+      `${String(project.name).toLowerCase().replace(/[^a-z0-9_.-]/g, '-')}-${String(deploymentId).slice(0, 8)}`;
 
-    // 8. Start Docker container
-    const containerResult = await runContainer(
+    containerResult = await runContainer(
       deployment.imageTag,
       containerName,
       envVars,
       hostPort,
       containerPort
     );
-    deployment.hostPort = hostPort;
-deployment.containerPort = containerPort;
-await deployment.save();
 
-    // 9. Save container information
+    // Give Docker a moment to report an immediate crash.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+
+    const inspect = await containerResult.container.inspect();
+
+    if (!inspect.State.Running) {
+      let containerLogs = '';
+
+      try {
+        containerLogs = await new Promise((resolve, reject) => {
+          containerResult.container.logs(
+            {
+              stdout: true,
+              stderr: true,
+              tail: 60,
+            },
+            (error, output) => {
+              if (error) return reject(error);
+              resolve(output.toString());
+            }
+          );
+        });
+      } catch (_) {
+        // Preserve the container state error even if logs cannot be read.
+      }
+
+      throw new Error(
+        `Container exited immediately. ${inspect.State.Error || ''} ${containerLogs}`
+      );
+    }
+
     await Container.create({
       deployment: deploymentId,
       project: project._id,
@@ -283,27 +342,27 @@ await deployment.save();
       lastCheckedAt: new Date(),
     });
 
-    // 10. Mark deployment as running
-    deployment.status = 'running';
-    deployment.finishedAt = new Date();
+    deployment.hostPort = hostPort;
+deployment.containerPort = containerPort;
+deployment.deploymentUrl = `http://localhost:${hostPort}`;
+deployment.status = 'running';
+deployment.finishedAt = new Date();
+deployment.errorMessage = '';
 
-    await deployment.save();
+await deployment.save();
 
-    // 11. Mark project as running
     await setProject({
       status: 'running',
       lastDeployedAt: new Date(),
       framework,
     });
 
-    // 12. Success log
     await emitLog(
       deploymentId,
       'success',
-      `Deployment successful! Container running on port ${hostPort}`
+      `Deployment successful! Live URL: http://localhost:${hostPort}`
     );
 
-    // 13. Success notification
     await sendNotification(
       deployment.triggeredBy,
       `Project ${project.name} deployed successfully!`,
@@ -312,15 +371,18 @@ await deployment.save();
   } catch (error) {
     console.error('Deployment failed:', error);
 
+    if (containerResult?.container) {
+      try {
+        await containerResult.container.stop();
+      } catch (_) {}
+    }
+
     deployment.status = 'failed';
     deployment.errorMessage = error.message;
     deployment.finishedAt = new Date();
-
     await deployment.save().catch(() => {});
 
-    await setProject({
-      status: 'failed',
-    }).catch(() => {});
+    await setProject({ status: 'failed' }).catch(() => {});
 
     await emitLog(
       deploymentId,
@@ -346,9 +408,7 @@ exports.triggerDeployment = async (req, res, next) => {
     });
 
     if (!project) {
-      return res.status(404).json({
-        message: 'Project not found',
-      });
+      return res.status(404).json({ message: 'Project not found' });
     }
 
     if (!project.sourcePath) {
@@ -366,7 +426,7 @@ exports.triggerDeployment = async (req, res, next) => {
     const deployment = await Deployment.create({
       project: project._id,
       triggeredBy: req.user._id,
-      imageTag: `cloudforge/${project.name}:${Date.now()}`,
+      imageTag: `cloudforge/${String(project.name).toLowerCase().replace(/[^a-z0-9_.-]/g, '-')}:${Date.now()}`,
       status: 'pending',
       source:
         project.sourceType === 'github'
@@ -381,16 +441,9 @@ exports.triggerDeployment = async (req, res, next) => {
     project.status = 'building';
     await project.save();
 
-    // Run deployment in background
-    runDeploymentPipeline(
-      deployment,
-      project
-    ).catch(console.error);
+    runDeploymentPipeline(deployment, project).catch(console.error);
 
-    // Immediately return deployment
-    res.status(202).json({
-      deployment,
-    });
+    return res.status(202).json({ deployment });
   } catch (error) {
     next(error);
   }
@@ -402,20 +455,67 @@ exports.getDeployments = async (req, res, next) => {
       owner: req.user._id,
     }).distinct('_id');
 
-    const filter = {
-      project: {
-        $in: projectIds,
-      },
-    };
+    const deployments = await Deployment.find({
+      project: { $in: projectIds },
+    }).sort({ createdAt: -1 });
 
-    if (req.query.status) {
-      filter.status = req.query.status;
+    for (const deployment of deployments) {
+      if (deployment.status !== 'running') continue;
+
+      const container = await Container.findOne({
+        deployment: deployment._id,
+      });
+
+      // Docker's state is authoritative, even if the DB container status is stale.
+      const running = container
+        ? await isContainerRunning(container.containerId)
+        : false;
+
+      if (!running) {
+        deployment.status = 'stopped';
+        deployment.finishedAt = new Date();
+        await deployment.save();
+
+        if (container && container.status !== 'stopped') {
+          container.status = 'stopped';
+          container.cpuUsagePercent = 0;
+          container.memoryUsageMB = 0;
+          container.lastCheckedAt = new Date();
+          await container.save();
+        }
+      } else if (container.status !== 'running') {
+        container.status = 'running';
+        await container.save();
+      }
     }
 
-    const deployments = await Deployment.find(filter)
+    for (const projectId of projectIds) {
+      const activeDeployments = await Deployment.find({
+        project: projectId,
+        status: { $in: ['running', 'building', 'pending'] },
+      }).select('status');
+
+      const status = activeDeployments.some((deployment) => deployment.status === 'running')
+        ? 'running'
+        : activeDeployments.some((deployment) =>
+            deployment.status === 'building' || deployment.status === 'pending'
+          )
+          ? 'building'
+          : 'stopped';
+
+      await Project.updateOne(
+        { _id: projectId },
+        { $set: { status } }
+      );
+    }
+
+    const updatedFilter = { project: { $in: projectIds } };
+    if (req.query.status) updatedFilter.status = req.query.status;
+
+    const updatedDeployments = await Deployment.find(updatedFilter)
       .sort({ createdAt: -1 });
 
-    res.json(deployments);
+    res.json(updatedDeployments);
   } catch (error) {
     next(error);
   }
@@ -449,10 +549,7 @@ exports.getDeploymentLogs = async (req, res, next) => {
 
     const logs = await Log.find({
       deployment: deployment._id,
-    }).sort({
-      timestamp: 1,
-      _id: 1,
-    });
+    }).sort({ timestamp: 1, _id: 1 });
 
     res.json(logs);
   } catch (error) {

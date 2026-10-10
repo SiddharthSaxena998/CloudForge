@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Snake</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="card">
+    <header>
+      <h1>SNAKE<span>.</span></h1>
+      <div class="scores">
+        <div><small>Score</small><b id="score">0</b></div>
+        <div><small>Best</small><b id="best">0</b></div>
+        <div><small>Level</small><b id="level">1</b></div>
+      </div>
+    </header>
+
+    <div class="board">
+      <canvas id="canvas" width="480" height="480"></canvas>
+      <div class="overlay" id="overlay">
+        <h2 id="ovTitle">Ready?</h2>
+        <p id="ovText">Arrow keys / WASD or swipe to move</p>
+        <button id="startBtn">Play</button>
+      </div>
+    </div>
+
+    <div class="pad" aria-label="controls">
+      <button data-dir="up">▲</button>
+      <button data-dir="left">◀</button>
+      <button data-dir="down">▼</button>
+      <button data-dir="right">▶</button>
+    </div>
+
+    <p class="hint">Space = pause &nbsp;·&nbsp; Enter = restart</p>
+    <footer>Served from <code id="host">file</code></footer>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>

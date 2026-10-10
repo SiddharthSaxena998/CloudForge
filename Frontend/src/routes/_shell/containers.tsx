@@ -3,7 +3,7 @@ import { RemoteGate } from "@/components/remote-gate";
 import { attempt } from "@/lib/attempt";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { ExternalLink, Search } from "lucide-react";
+import { ExternalLink, Search, Trash2 } from "lucide-react";
 import { PageShell } from "@/components/page-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,7 @@ function ContainersPage() {
 
   const [query, setQuery] = useState("");
   const [stopping, setStopping] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const q = query.trim().toLowerCase();
 
@@ -228,6 +229,36 @@ function ContainersPage() {
                         >
                           {stopping === c.id ? "Stopping" : "Stop"}
                         </Button>
+
+                        {c.status === "stopped" && (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={deleting === c.id}
+                            onClick={async () => {
+                              const confirmed = window.confirm(
+                                `Delete stopped container "${c.name}" permanently?`
+                              );
+
+                              if (!confirmed) return;
+
+                              setDeleting(c.id);
+
+                              try {
+                                const result = await attempt(
+                                  api.deleteContainer(c.id)
+                                );
+
+                                if (result.ok) window.location.reload();
+                              } finally {
+                                setDeleting(null);
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {deleting === c.id ? "Deleting..." : "Delete"}
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

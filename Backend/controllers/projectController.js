@@ -1,237 +1,16 @@
-// const Project = require('../models/Project');
-// const Log = require('../models/Log');
-// const User = require('../models/User');
-// const path = require('path');
-// const fs = require('fs');
-// const safeArchive = require('../utils/archive');
-// const git = require('../utils/git');
-
-// exports.getProjects = async (req, res, next) => {
-//   try {
-//     const projects = await Project.find({ owner: req.user._id }).sort({ createdAt: -1 });
-//     res.json(projects);
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
-// exports.createProject = async (req, res, next) => {
-//   try {
-//     const { name, description, sourceType, repo, repoUrl: repoUrlBody, branch, archiveName } = req.body;
-//     const finalRepoUrl = repo || repoUrlBody;
-//     let sourcePath = '';
-//     let framework = '';
-
-//     if (sourceType === 'github') {
-//       if (!finalRepoUrl) {
-//         return res.status(400).json({ message: 'GitHub repo URL is required' });
-//       }
-//       sourcePath = await git.cloneRepo(finalRepoUrl, name, branch);
-//     } else if (sourceType === 'upload') {
-//       if (!req.file) {
-//         return res.status(400).json({ message: 'Archive file is required' });
-//       }
-//       const uploadDir = path.join(__dirname, '..', 'uploads', name);
-//       await safeArchive.extract(req.file.path, uploadDir);
-//       sourcePath = uploadDir;
-//       framework = safeArchive.detectFramework(uploadDir);
-//     } else {
-//       return res.status(400).json({ message: 'Invalid sourceType' });
-//     }
-
-//     // Auto-detect framework if not explicitly provided
-//     if (!framework && sourceType === 'upload') {
-//       framework = safeArchive.detectFramework(uploadDir);
-//     }
-
-//     const project = await Project.create({
-//       owner: req.user._id,
-//       name,
-//       description,
-//       sourceType,
-//       repoUrl: finalRepoUrl,
-//       branch,
-//       sourcePath,
-//       framework,
-//       status: sourceType === 'github' ? 'active' : 'building',
-//     });
-
-//     res.status(201).json(project);
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
-// exports.getProjectById = async (req, res, next) => {
-//   try {
-//     const project = await Project.findById(req.params.id);
-//     if (!project) {
-//       return res.status(404).json({ message: 'Project not found' });
-//     }
-//     res.json(project);
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
-// exports.updateProject = async (req, res, next) => {
-//   try {
-//     const { name, description, branch, envVars } = req.body;
-//     const project = await Project.findById(req.params.id);
-
-//     if (!project) {
-//       return res.status(404).json({ message: 'Project not found' });
-//     }
-
-//     if (name !== undefined) project.name = name;
-//     if (description !== undefined) project.description = description;
-//     if (branch !== undefined) project.branch = branch;
-//     if (envVars !== undefined) project.envVars = envVars;
-
-//     await project.save();
-//     res.json(project);
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
-// exports.deleteProject = async (req, res, next) => {
-//   try {
-//     const project = await Project.findByIdAndDelete(req.params.id);
-//     if (!project) {
-//       return res.status(404).json({ message: 'Project not found' });
-//     }
-//     res.json({ message: 'Project deleted successfully' });
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
-// exports.getProjectFiles = async (req, res, next) => {
-//   try {
-//     const project = await Project.findById(req.params.id);
-//     if (!project) {
-//       return res.status(404).json({ message: 'Project not found' });
-//     }
-
-//     const filesDir = path.join(__dirname, '..', 'uploads', project.name);
-//     if (!fs.existsSync(filesDir)) {
-//       return res.json([]);
-//     }
-
-//     const files = [];
-//     const readDir = (dir) => {
-//       const entries = fs.readdirSync(dir, { withFileTypes: true });
-//       for (const entry of entries) {
-//         const fullPath = path.join(dir, entry.name);
-//         if (entry.isDirectory()) {
-//           readDir(fullPath);
-//         } else {
-//           const relPath = path.relative(filesDir, fullPath);
-//           files.push({ path: relPath, content: null });
-//         }
-//       }
-//     };
-//     readDir(filesDir);
-
-//     res.json(files);
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
-// exports.getFileContent = async (req, res, next) => {
-//   try {
-//     const project = await Project.findById(req.params.id);
-//     if (!project) {
-//       return res.status(404).json({ message: 'Project not found' });
-//     }
-
-//     const filePath = path.join(__dirname, '..', 'uploads', project.name, req.query.path);
-//     const resolvedPath = path.resolve(filePath);
-
-//     // Path traversal protection: ensure resolved path is inside project folder
-//     const projectBase = path.resolve(path.join(__dirname, '..', 'uploads', project.name));
-//     if (!resolvedPath.startsWith(projectBase + path.sep) && resolvedPath !== projectBase) {
-//       return res.status(403).json({ message: 'Path traversal detected' });
-//     }
-
-//     if (!fs.existsSync(resolvedPath)) {
-//       return res.status(404).json({ message: 'File not found' });
-//     }
-
-//     const content = fs.readFileSync(resolvedPath, 'utf-8');
-//     res.json({ path: req.query.path, content });
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
-// exports.saveFileContent = async (req, res, next) => {
-//   try {
-//     const project = await Project.findById(req.params.id);
-//     if (!project) {
-//       return res.status(404).json({ message: 'Project not found' });
-//     }
-
-//     const filePath = path.join(__dirname, '..', 'uploads', project.name, req.body.path);
-//     const resolvedPath = path.resolve(filePath);
-
-//     // Path traversal protection
-//     const projectBase = path.resolve(path.join(__dirname, '..', 'uploads', project.name));
-//     if (!resolvedPath.startsWith(projectBase + path.sep) && resolvedPath !== projectBase) {
-//       return res.status(403).json({ message: 'Path traversal detected' });
-//     }
-
-//     // Ensure directory exists
-//     const dirPath = path.dirname(resolvedPath);
-//     if (!fs.existsSync(dirPath)) {
-//       fs.mkdirSync(dirPath, { recursive: true });
-//     }
-
-//     fs.writeFileSync(resolvedPath, req.body.content, 'utf-8');
-//     res.json({ path: req.body.path, success: true });
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
-// exports.getEnvVars = async (req, res, next) => {
-//   try {
-//     const project = await Project.findById(req.params.id);
-//     if (!project) {
-//       return res.status(404).json({ message: 'Project not found' });
-//     }
-
-//     res.json({ vars: project.envVars });
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
-// exports.updateEnvVars = async (req, res, next) => {
-//   try {
-//     const project = await Project.findById(req.params.id);
-//     if (!project) {
-//       return res.status(404).json({ message: 'Project not found' });
-//     }
-
-//     project.envVars = req.body.vars || [];
-//     await project.save();
-//     res.json({ success: true });
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
-
-
 
 const Project = require('../models/Project');
+const Container = require('../models/Container');
+const Deployment = require('../models/Deployment');
+const Log = require('../models/Log');
 const path = require('path');
 const fs = require('fs');
 const safeArchive = require('../utils/archive');
 const git = require('../utils/git');
+const {
+  assertContainerStopped: assertDockerContainerStopped,
+  deleteContainer: deleteDockerContainer,
+} = require('../utils/docker');
 
 const UPLOADS_ROOT = path.resolve(__dirname, '..', 'uploads');
 const NAME_RE = /^[a-z0-9][a-z0-9-]{1,38}$/;
@@ -369,17 +148,70 @@ exports.updateProject = async (req, res, next) => {
 
 exports.deleteProject = async (req, res, next) => {
   try {
-    const project = await Project.findOneAndDelete({ _id: req.params.id, owner: req.user._id });
+    const project = await Project.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+    });
+
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
-    // sirf uploads folder ke andar wali directory delete karo
+    if (project.status !== 'stopped') {
+      return res.status(409).json({
+        message: 'Only stopped projects can be deleted.',
+      });
+    }
+
+    const activeDeployment = await Deployment.exists({
+      project: project._id,
+      status: { $in: ['running', 'building', 'pending'] },
+    });
+
+    if (activeDeployment || ['running', 'building'].includes(project.status)) {
+      return res.status(409).json({
+        message: 'Stop all active deployments before deleting this project.',
+      });
+    }
+
+    const containers = await Container.find({ project: project._id });
+    const activeContainer = containers.some((container) =>
+      ['running', 'building', 'pending'].includes(container.status)
+    );
+
+    if (activeContainer) {
+      return res.status(409).json({
+        message: 'Stop all containers before deleting this project.',
+      });
+    }
+
+    // Preflight every Docker resource before removing any, avoiding partial
+    // cleanup when a DB status is stale and a later container is still running.
+    for (const container of containers) {
+      await assertDockerContainerStopped(container.containerId);
+    }
+
+    for (const container of containers) {
+      await deleteDockerContainer(container.containerId);
+    }
+
+    const deployments = await Deployment.find({ project: project._id }).select('_id');
+    const deploymentIds = deployments.map((deployment) => deployment._id);
+
+    await Container.deleteMany({ project: project._id });
+    await Log.deleteMany({ deployment: { $in: deploymentIds } });
+    await Deployment.deleteMany({ _id: { $in: deploymentIds } });
+
+    // Only remove project data stored beneath the managed uploads directory.
     const base = baseDirOf(project);
     if (base && base.startsWith(UPLOADS_ROOT + path.sep)) {
-      await fs.promises.rm(base, { recursive: true, force: true }).catch(() => {});
+      await fs.promises.rm(base, { recursive: true, force: true });
     }
-    // TODO: is project ke deployments / containers / logs bhi delete karo
 
-    res.json({ message: 'Project deleted successfully' });
+    await Project.deleteOne({ _id: project._id });
+
+    return res.json({
+      success: true,
+      message: 'Project and associated resources deleted successfully',
+    });
   } catch (error) {
     next(error);
   }

@@ -19,7 +19,8 @@ const deploymentSchema = new mongoose.Schema(
 
     // Deployed app ports
     hostPort: { type: Number, default: null },
-    containerPort: { type: Number, default: null },
+containerPort: { type: Number, default: null },
+deploymentUrl: { type: String, default: '' },
   },
   { timestamps: true }
 );

@@ -1,0 +1,18 @@
+{
+  "watch": [
+    "server.js",
+    "app.js",
+    "config",
+    "controllers",
+    "middleware",
+    "models",
+    "routes",
+    "utils"
+  ],
+  "ignore": [
+    "uploads/**",
+    "node_modules/**",
+    "taxpal9522/**"
+  ],
+  "ext": "js,json"
+}
