@@ -65,6 +65,7 @@ function ProjectDetailPage() {
       resources={[
         "projects",
         "deployments",
+        "containers",
         `env:${projectId}`,
         `files:${projectId}`,
       ]}
@@ -83,6 +84,12 @@ function ProjectDetail({ projectId }: { projectId: string }) {
     s.deployments.filter((d) => d.projectId === projectId)
   );
 
+  const publicUrl = useStore(
+    (s) =>
+      s.containers.find(
+        (c) => c.projectId === projectId && c.status === "running" && c.publicUrl
+      )?.publicUrl ?? ""
+  );
   const runningDeployment = deployments.find(
     (d) => d.status === "running" && d.hostPort
   );
@@ -111,6 +118,16 @@ function ProjectDetail({ projectId }: { projectId: string }) {
       description={project.description}
       action={
         <div className="flex items-center gap-2">
+          {publicUrl && (
+            <Button
+              size="sm"
+              onClick={() => window.open(publicUrl, "_blank", "noopener,noreferrer")}
+            >
+              <ExternalLink className="h-4 w-4" />
+              Public Link
+            </Button>
+          )}
+
           {runningDeployment?.hostPort && (
             <Button
               size="sm"

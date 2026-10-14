@@ -21,6 +21,7 @@ const deploymentSchema = new mongoose.Schema(
     hostPort: { type: Number, default: null },
 containerPort: { type: Number, default: null },
 deploymentUrl: { type: String, default: '' },
+    publicUrl: { type: String, default: '' },
   },
   { timestamps: true }
 );

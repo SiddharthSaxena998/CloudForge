@@ -3,7 +3,7 @@ import { RemoteGate } from "@/components/remote-gate";
 import { attempt } from "@/lib/attempt";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { ExternalLink, Search, Trash2 } from "lucide-react";
+import { Copy, ExternalLink, Globe, Search, Trash2 } from "lucide-react";
 import { PageShell } from "@/components/page-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -198,6 +198,36 @@ function ContainersPage() {
 
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        {active && c.publicUrl && (
+                          <>
+                            <Button
+                              asChild
+                              size="sm"
+                              variant="secondary"
+                              title={c.publicUrl}
+                            >
+                              <a
+                                href={c.publicUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <Globe className="h-3.5 w-3.5" />
+                                Public Link
+                              </a>
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Copy public link"
+                              onClick={() =>
+                                void navigator.clipboard?.writeText(c.publicUrl)
+                              }
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
+                        )}
+
                         <Button
                           asChild
                           size="sm"
@@ -209,7 +239,7 @@ function ContainersPage() {
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Open App
+                            Local
                             <ExternalLink className="h-3.5 w-3.5" />
                           </a>
                         </Button>

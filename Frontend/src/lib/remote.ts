@@ -136,6 +136,8 @@ function mapContainer(value: ApiContainer) {
     ),
     memoryLimitMb,
     url: apiUrl || (hostPort ? `http://localhost:${hostPort}` : ""),
+    publicUrl:
+      typeof value["publicUrl"] === "string" ? value["publicUrl"] : "",
   };
 }
 

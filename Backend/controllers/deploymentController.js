@@ -17,6 +17,7 @@ const {
 
 const { sendNotification } = require('../utils/notify');
 const { detectFramework } = require('../utils/frameworkDetector');
+const { startTunnel } = require('../utils/tunnel');
 
 // ---------- helpers ----------
 
@@ -329,7 +330,7 @@ const runDeploymentPipeline = async (deployment, project) => {
       );
     }
 
-    await Container.create({
+    const containerDoc = await Container.create({
       deployment: deploymentId,
       project: project._id,
       containerId: containerResult.id,
@@ -345,6 +346,19 @@ const runDeploymentPipeline = async (deployment, project) => {
     deployment.hostPort = hostPort;
 deployment.containerPort = containerPort;
 deployment.deploymentUrl = `http://localhost:${hostPort}`;
+
+    // Free public link via Cloudflare Quick Tunnel (non-fatal if unavailable).
+    await emitLog(deploymentId, 'info', 'Creating public link (Cloudflare Tunnel)...');
+    const tunnel = await startTunnel(containerDoc._id, hostPort);
+    if (tunnel.url) {
+      deployment.publicUrl = tunnel.url;
+      containerDoc.publicUrl = tunnel.url;
+      await containerDoc.save();
+      await emitLog(deploymentId, 'success', `Public URL: ${tunnel.url}`);
+    } else {
+      await emitLog(deploymentId, 'warn', `No public link: ${tunnel.reason}`);
+    }
+
 deployment.status = 'running';
 deployment.finishedAt = new Date();
 deployment.errorMessage = '';

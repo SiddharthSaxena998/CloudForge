@@ -50,6 +50,11 @@ const containerSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  // Free public link (Cloudflare Quick Tunnel); empty if unavailable.
+  publicUrl: {
+    type: String,
+    default: "",
+  },
 });
 
 containerSchema.index({ project: 1 });

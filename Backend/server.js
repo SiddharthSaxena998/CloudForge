@@ -1,7 +1,7 @@
 const express = require('express');
+const { validateEnv, applySecurity, isOriginAllowed, authLimiter, apiLimiter } = require('./config/security');
 const mongoose = require('mongoose');
 const http = require('http');
-const cors = require('cors');
 const dotenv = require('dotenv');
 const jwt = require('jsonwebtoken');
 const authRoutes = require('./routes/auth');
@@ -12,22 +12,39 @@ const containerRoutes = require('./routes/containers');
 const errorHandler = require('./middleware/error-handler');
 const Notification = require('./models/Notification');
 const User = require('./models/User');
+const Container = require('./models/Container');
+const Deployment = require('./models/Deployment');
+const { startTunnel, stopAllTunnels } = require('./utils/tunnel');
 
 dotenv.config();
+validateEnv();
 
 const app = express();
 const server = http.createServer(app);
 
 // Middleware
-app.use(cors());
+applySecurity(app); // helmet + CORS allow-list (+ trust proxy if TRUST_PROXY is set)
+app.use('/api', apiLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Socket.IO setup
 const io = require('socket.io')(server, {
   cors: {
-    origin: '*',
+    origin: (origin, cb) => cb(null, isOriginAllowed(origin)),
     methods: ['GET', 'POST']
+  }
+});
+
+// Only logged-in users may open a socket: client sends io(url, { auth: { token } })
+io.use((socket, next) => {
+  try {
+    socket.user = jwt.verify(socket.handshake.auth?.token, process.env.JWT_SECRET);
+    next();
+  } catch (e) {
+    next(new Error('Unauthorized'));
   }
 });
 
@@ -107,6 +124,26 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
+// Quick-tunnel URLs die with the backend process, so on startup re-create a
+// fresh public link for every container that is still running.
+async function restoreTunnels() {
+  const running = await Container.find({ status: 'running' });
+  for (const c of running) {
+    const { url } = await startTunnel(c._id, c.hostPort);
+    c.publicUrl = url || '';
+    await c.save();
+    if (c.deployment) {
+      await Deployment.updateOne({ _id: c.deployment }, { $set: { publicUrl: url || '' } });
+    }
+    if (url) console.log(`Public link for ${c.name}: ${url}`);
+  }
+}
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => { stopAllTunnels(); process.exit(0); });
+}
+process.on('exit', stopAllTunnels);
+
 const startServer = async () => {
   try {
     console.log('Attempting to connect to MongoDB...');
@@ -125,6 +162,8 @@ const startServer = async () => {
       const { startContainerStatsBroadcast } = require('./controllers/containerController');
       startContainerStatsBroadcast();
       console.log('Container stats broadcast started (every 5 seconds)');
+
+      restoreTunnels().catch((e) => console.error('Tunnel restore failed:', e.message));
     });
   } catch (error) {
     console.error('Server startup error:', error);

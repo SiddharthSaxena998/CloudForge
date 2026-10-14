@@ -43,6 +43,8 @@ export interface Container {
   memoryMb: number;
   memoryLimitMb: number | null;
   url: string;
+  /** Free public link (Cloudflare Tunnel), empty if unavailable */
+  publicUrl: string;
 }
 export type NotificationKind = "success" | "failure" | "info";
 export interface AppNotification {

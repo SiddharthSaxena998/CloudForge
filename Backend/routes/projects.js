@@ -5,19 +5,20 @@ const ownershipCheck = require('../middleware/ownership-check');
 const upload = require('../middleware/upload');
 const projectController = require('../controllers/projectController');
 const deploymentController = require('../controllers/deploymentController');
+const { heavyLimiter } = require('../config/security');
 
 // All project routes require authentication
 router.use(authenticate);
 
 // Project CRUD
 router.get('/', projectController.getProjects);
-router.post('/', upload.single('archive'), projectController.createProject);
+router.post('/', heavyLimiter, upload.single('archive'), projectController.createProject);
 router.get('/:id', ownershipCheck, projectController.getProjectById);
 router.put('/:id', ownershipCheck, projectController.updateProject);
 router.delete('/:id', ownershipCheck, projectController.deleteProject);
 
 // Deploy (frontend: POST /projects/:id/deploy)
-router.post('/:id/deploy', ownershipCheck, deploymentController.triggerDeployment);
+router.post('/:id/deploy', heavyLimiter, ownershipCheck, deploymentController.triggerDeployment);
 
 // File browser/editor
 router.get('/:id/files', ownershipCheck, projectController.getProjectFiles);

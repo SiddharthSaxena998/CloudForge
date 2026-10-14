@@ -1,5 +1,6 @@
 
 const Container = require("../models/Container");
+const { stopTunnel } = require("../utils/tunnel");
 const Project = require("../models/Project");
 const Deployment = require("../models/Deployment");
 
@@ -308,7 +309,10 @@ exports.stopContainer = async (req, res, next) => {
     // Stop the actual Docker container before changing persisted state.
     await stopDockerContainer(container.containerId);
 
+    stopTunnel(container._id);
+
     container.status = "stopped";
+    container.publicUrl = "";
     container.cpuUsagePercent = 0;
     container.memoryUsageMB = 0;
     container.lastCheckedAt = new Date();
@@ -413,6 +417,8 @@ exports.deleteContainer = async (req, res, next) => {
         message: "Only stopped containers can be deleted",
       });
     }
+
+    stopTunnel(container._id);
 
     // Remove actual Docker resource first.
     await deleteDockerContainer(container.containerId);

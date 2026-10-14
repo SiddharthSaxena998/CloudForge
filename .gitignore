@@ -2,4 +2,14 @@ node_modules/
 Backend/node_modules/
 Frontend/node_modules/
 .DS_Store
-node_modules/
+
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+
+# User-uploaded / cloned project sources and local leftovers
+Backend/uploads/
+Backend/taxpal9522/
+Backend/nodemon.json.save
+*.log

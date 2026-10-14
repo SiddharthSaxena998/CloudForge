@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { isValidEmail } = require('../utils/validators');
 
 exports.register = async (req, res, next) => {
   try {
@@ -9,18 +10,30 @@ exports.register = async (req, res, next) => {
       return res.status(400).json({ message: 'Name, email, and password are required' });
     }
 
-    if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    if ([name, email, password].some((v) => typeof v !== 'string')) {
+      return res.status(400).json({ message: 'Name, email, and password must be text' });
     }
 
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (name.trim().length < 2 || name.length > 80) {
+      return res.status(400).json({ message: 'Name must be 2-80 characters' });
+    }
+
+    if (!isValidEmail(email.trim())) {
+      return res.status(400).json({ message: 'Enter a valid email address' });
+    }
+
+    if (password.length < 8 || password.length > 128) {
+      return res.status(400).json({ message: 'Password must be 8-128 characters' });
+    }
+
+    const existingUser = await User.findOne({ email: email.trim().toLowerCase() });
     if (existingUser) {
       return res.status(409).json({ message: 'Email already in use' });
     }
 
     const user = await User.create({
-      name,
-      email,
+      name: name.trim(),
+      email: email.trim(),
       password
     });
 
@@ -44,7 +57,11 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ message: 'Email and password must be text' });
+    }
+
+    const user = await User.findOne({ email: email.trim().toLowerCase() }).select('+password');
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }

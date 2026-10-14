@@ -7,6 +7,8 @@ const path = require('path');
 const fs = require('fs');
 const safeArchive = require('../utils/archive');
 const git = require('../utils/git');
+const { resolveInside } = require('../utils/pathSafety');
+const { normalizeGithubUrl, isValidBranch, RESERVED_NAMES } = require('../utils/validators');
 const {
   assertContainerStopped: assertDockerContainerStopped,
   deleteContainer: deleteDockerContainer,
@@ -14,7 +16,6 @@ const {
 
 const UPLOADS_ROOT = path.resolve(__dirname, '..', 'uploads');
 const NAME_RE = /^[a-z0-9][a-z0-9-]{1,38}$/;
-const GITHUB_RE = /^(https?:\/\/)?github\.com\/[\w.-]+\/[\w.-]+/;
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next']);
 const MAX_FILES = 500;
 const MAX_FILE_BYTES = 200 * 1024;
@@ -25,12 +26,6 @@ const findOwned = (req) =>
 
 const baseDirOf = (project) =>
   project.sourcePath ? path.resolve(project.sourcePath) : null;
-
-const resolveInside = (base, rel) => {
-  if (!base || typeof rel !== 'string' || !rel) return null;
-  const resolved = path.resolve(base, rel);
-  return resolved.startsWith(base + path.sep) ? resolved : null;
-};
 
 const sanitizeEnv = (input) => {
   const list = Array.isArray(input) ? input : Array.isArray(input?.vars) ? input.vars : null;
@@ -63,6 +58,9 @@ exports.createProject = async (req, res, next) => {
     if (!NAME_RE.test(name || '')) {
       return res.status(400).json({ message: 'Use 2-39 lowercase letters, numbers or hyphens.' });
     }
+    if (RESERVED_NAMES.has(name)) {
+      return res.status(400).json({ message: 'That project name is reserved. Choose another.' });
+    }
     if (await Project.exists({ name })) {
       return res.status(409).json({ message: 'A project with that name already exists.' });
     }
@@ -71,13 +69,17 @@ exports.createProject = async (req, res, next) => {
     let archiveName = '';
 
     if (sourceType === 'github') {
-      if (!GITHUB_RE.test(finalRepoUrl)) {
-        return res.status(400).json({ message: 'Enter a valid GitHub URL.' });
+      const cleanUrl = normalizeGithubUrl(finalRepoUrl);
+      if (!cleanUrl) {
+        return res.status(400).json({ message: 'Enter a valid GitHub URL (https://github.com/owner/repo).' });
       }
       if (!branch.trim()) {
         return res.status(400).json({ message: 'Branch is required.' });
       }
-      sourcePath = await git.cloneRepo(finalRepoUrl, name, branch.trim());
+      if (!isValidBranch(branch.trim())) {
+        return res.status(400).json({ message: 'Invalid branch name.' });
+      }
+      sourcePath = await git.cloneRepo(cleanUrl, name, branch.trim());
     } else if (sourceType === 'archive') {
       if (!req.file) {
         return res.status(400).json({ message: 'Archive file is required' });
@@ -262,6 +264,9 @@ exports.getFileContent = async (req, res, next) => {
     if (!target) return res.status(403).json({ message: 'Invalid file path' });
     if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
       return res.status(404).json({ message: 'File not found' });
+    }
+    if (fs.statSync(target).size > 512 * 1024) {
+      return res.status(413).json({ message: 'File is too large to edit in the browser (max 512 KB)' });
     }
 
     res.json({ path: req.query.path, content: fs.readFileSync(target, 'utf-8') });

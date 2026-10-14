@@ -14,22 +14,26 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, Date.now() + ext);
+    const name = file.originalname.toLowerCase();
+    // keep the real archive suffix so utils/archive.js can pick unzip vs tar
+    const ext = name.endsWith('.zip') ? '.zip' : name.endsWith('.tgz') ? '.tgz' : '.gz';
+    cb(null, Date.now() + '-' + Math.random().toString(36).slice(2, 8) + ext);
   }
 });
 
 // File filter - allow zip and tar.gz
+const ALLOWED_SUFFIXES = ['.zip', '.tar.gz', '.tgz'];
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = ['.zip', '.tar.gz', '.tgz'];
-  const ext = path.extname(file.originalname).toLowerCase();
-  if (allowedTypes.includes(ext)) {
+  // Note: path.extname('a.tar.gz') is only '.gz', so match on the full suffix.
+  const name = file.originalname.toLowerCase();
+  if (ALLOWED_SUFFIXES.some((suffix) => name.endsWith(suffix))) {
     cb(null, true);
   } else {
     cb(new Error('Only .zip, .tar.gz archives are allowed'), false);
   }
 };
 
-const upload = multer({ storage, fileFilter });
+const maxBytes = (Number(process.env.MAX_UPLOAD_MB) || 100) * 1024 * 1024;
+const upload = multer({ storage, fileFilter, limits: { fileSize: maxBytes, files: 1 } });
 
 module.exports = upload;
