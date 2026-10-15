@@ -11,6 +11,7 @@
  * Env:
  *   ENABLE_TUNNEL=false     -> turn the feature off
  *   CLOUDFLARED_BIN=/path   -> custom binary location
+ *   TUNNEL_TARGET_HOST=...  -> where deployed apps listen (host.docker.internal under Compose)
  */
 const { spawn } = require('child_process');
 
@@ -22,6 +23,8 @@ const tunnels = new Map();
 
 const enabled = () => String(process.env.ENABLE_TUNNEL).toLowerCase() !== 'false';
 const bin = () => process.env.CLOUDFLARED_BIN || 'cloudflared';
+// 127.0.0.1 when the backend runs on the host; host.docker.internal when it runs in Docker Compose
+const targetHost = () => process.env.TUNNEL_TARGET_HOST || '127.0.0.1';
 
 /**
  * Starts (or reuses) a tunnel for a local port.
@@ -49,7 +52,7 @@ function startTunnel(key, port) {
     try {
       proc = spawn(
         bin(),
-        ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${port}`],
+        ['tunnel', '--no-autoupdate', '--url', `http://${targetHost()}:${port}`],
         { stdio: ['ignore', 'pipe', 'pipe'] }
       );
     } catch (error) {

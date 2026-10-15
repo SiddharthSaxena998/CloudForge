@@ -8,6 +8,7 @@ const fs = require('fs');
 const safeArchive = require('../utils/archive');
 const git = require('../utils/git');
 const { resolveInside } = require('../utils/pathSafety');
+const { limits, isExempt } = require('../config/limits');
 const { normalizeGithubUrl, isValidBranch, RESERVED_NAMES } = require('../utils/validators');
 const {
   assertContainerStopped: assertDockerContainerStopped,
@@ -58,6 +59,14 @@ exports.createProject = async (req, res, next) => {
     if (!NAME_RE.test(name || '')) {
       return res.status(400).json({ message: 'Use 2-39 lowercase letters, numbers or hyphens.' });
     }
+    if (!isExempt(req.user)) {
+      const max = limits().maxProjects;
+      if ((await Project.countDocuments({ owner: req.user._id })) >= max) {
+        return res.status(403).json({
+          message: `Limit reached: you can create up to ${max} projects. Delete one to add another.`,
+        });
+      }
+    }
     if (RESERVED_NAMES.has(name)) {
       return res.status(400).json({ message: 'That project name is reserved. Choose another.' });
     }
@@ -99,7 +108,7 @@ exports.createProject = async (req, res, next) => {
       name,
       description,
       sourceType,
-      repoUrl: sourceType === 'github' ? finalRepoUrl : '',
+      repoUrl: sourceType === 'github' ? normalizeGithubUrl(finalRepoUrl) || '' : '',
       archiveName,
       branch: sourceType === 'github' ? branch.trim() : '',
       sourcePath,

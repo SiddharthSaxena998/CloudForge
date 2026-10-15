@@ -13,11 +13,18 @@ const {
   runContainer,
   getFreePort,
   isContainerRunning,
+  stopContainer: stopDockerContainer,
+  removeImage,
 } = require('../utils/docker');
 
 const { sendNotification } = require('../utils/notify');
 const { detectFramework } = require('../utils/frameworkDetector');
-const { startTunnel } = require('../utils/tunnel');
+const { startTunnel, stopTunnel } = require('../utils/tunnel');
+const Semaphore = require('../utils/semaphore');
+const { limits, isExempt } = require('../config/limits');
+
+// At most N builds at the same time; others wait their turn (see MAX_CONCURRENT_BUILDS)
+const buildSlots = new Semaphore(limits().maxConcurrentBuilds);
 
 // ---------- helpers ----------
 
@@ -193,6 +200,41 @@ const findOwnedDeployment = async (req) => {
 
 // ---------- deployment pipeline ----------
 
+const retirePreviousDeployments = async (projectId, newDeploymentId, newContainerId) => {
+  const oldContainers = await Container.find({
+    project: projectId,
+    _id: { $ne: newContainerId },
+    status: 'running',
+  });
+
+  for (const old of oldContainers) {
+    try {
+      stopTunnel(old._id);
+      await stopDockerContainer(old.containerId);
+    } catch (error) {
+      if (error.statusCode !== 404) console.error('Could not stop old container:', error.message);
+    }
+    old.status = 'stopped';
+    old.publicUrl = '';
+    old.cpuUsagePercent = 0;
+    old.memoryUsageMB = 0;
+    await old.save();
+  }
+
+  const oldDeployments = await Deployment.find({
+    project: projectId,
+    _id: { $ne: newDeploymentId },
+    status: 'running',
+  });
+
+  for (const dep of oldDeployments) {
+    dep.status = 'stopped';
+    dep.finishedAt = new Date();
+    await dep.save();
+    removeImage(dep.imageTag); // frees disk once its container is stopped (ignored if still in use)
+  }
+};
+
 const runDeploymentPipeline = async (deployment, project) => {
   const deploymentId = deployment._id;
 
@@ -253,14 +295,24 @@ const runDeploymentPipeline = async (deployment, project) => {
       'Building Docker image...'
     );
 
-    await buildImage(
-      deployment.imageTag,
-      project.sourcePath,
-      path.basename(dockerfilePath),
-      (line) => {
-        void emitLog(deploymentId, 'info', line);
-      },
-      buildArgs
+    if (buildSlots.busy) {
+      await emitLog(
+        deploymentId,
+        'info',
+        `Waiting for a free build slot (${buildSlots.queued + 1} in queue)...`
+      );
+    }
+
+    await buildSlots.run(() =>
+      buildImage(
+        deployment.imageTag,
+        project.sourcePath,
+        path.basename(dockerfilePath),
+        (line) => {
+          void emitLog(deploymentId, 'info', line);
+        },
+        buildArgs
+      )
     );
 
     await emitLog(
@@ -365,6 +417,12 @@ deployment.errorMessage = '';
 
 await deployment.save();
 
+    // Redeploy = replace: stop older containers of this project so they do not
+    // pile up, keep eating the quota, or hold on to old images.
+    await retirePreviousDeployments(project._id, deploymentId, containerDoc._id).catch((e) =>
+      console.error('Cleanup of previous deployments failed:', e.message)
+    );
+
     await setProject({
       status: 'running',
       lastDeployedAt: new Date(),
@@ -435,6 +493,24 @@ exports.triggerDeployment = async (req, res, next) => {
       return res.status(409).json({
         message: 'A deployment is already in progress',
       });
+    }
+
+    // Quota: running containers per user (this project's own containers get replaced, so not counted)
+    if (!isExempt(req.user)) {
+      const max = limits().maxRunningContainers;
+      const otherProjects = await Project.find({
+        owner: req.user._id,
+        _id: { $ne: project._id },
+      }).distinct('_id');
+      const running = await Container.countDocuments({
+        project: { $in: otherProjects },
+        status: 'running',
+      });
+      if (running >= max) {
+        return res.status(403).json({
+          message: `Limit reached: you can run ${max} apps at the same time. Stop another app first.`,
+        });
+      }
     }
 
     const deployment = await Deployment.create({

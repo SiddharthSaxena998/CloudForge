@@ -15,6 +15,11 @@ The owner writes in Hinglish; reply in Hinglish, keep it short.
 - `Frontend/` TanStack Start + React 19 + TypeScript + Tailwind/shadcn (generated with Lovable).
   Talks to `http://localhost:5000/api` (`src/config.ts`). Data layer: `src/lib/remote.ts`.
 
+## Run with Docker Compose (Phase 1)
+`docker compose up -d --build` (see docs/PHASE1.md). Backend in Docker uses the host Docker socket,
+`TUNNEL_TARGET_HOST=host.docker.internal`, ports for deployed apps from `APP_PORT_RANGE`.
+Don't mix `npm start` and Compose on the same uploads (absolute source paths differ).
+
 ## Run locally (Mac)
 1. Docker Desktop running ("Allow the default Docker socket" enabled). `brew install cloudflared`.
 2. `cd Backend && cp .env.example .env` (fill MONGO_URI, JWT_SECRET) `&& npm install && npm start`
@@ -41,7 +46,7 @@ Known gap: Socket.IO 'containers' room still broadcasts every user's stats to ev
 (fix with per-user rooms in Phase 4).
 
 ## Roadmap to a public multi-user platform
-0 security cleanup (done) -> 1 24x7 hosting (Docker Compose, free host) -> 2 sandbox user containers
+0 security cleanup (done) -> 1 Docker Compose on the Mac (files ready; 24x7 host later) -> 2 sandbox user containers
 (--memory/--cpus/--pids-limit, no privileged, quotas, build timeout, disk cleanup, protect docker.sock)
 -> 3 per-app subdomains (needs a domain) -> 4 multi-user features (approval, quotas, abuse handling)
 -> 5 reliability (BullMQ queue, log TTL, backups) -> 6 scale (multi-node/K8s).

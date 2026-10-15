@@ -1,0 +1,35 @@
+# CloudForge on one machine:  docker compose up -d --build
+# Dashboard: http://localhost:8080   API: http://localhost:5000
+# Needs Backend/.env (copy Backend/.env.example) with MONGO_URI (Atlas) and JWT_SECRET.
+services:
+  backend:
+    build: ./Backend
+    container_name: cloudforge-backend
+    restart: unless-stopped
+    env_file: ./Backend/.env
+    environment:
+      PORT: "5000"
+      # Deployed apps are published on the HOST, so the tunnel must reach them via the host
+      TUNNEL_TARGET_HOST: host.docker.internal
+      # Ports for deployed apps are picked from this range (must not clash with 5000/8080)
+      APP_PORT_RANGE: "20000-29999"
+    ports:
+      - "5000:5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Lets the backend build/run containers on your Docker (powerful: see docs/PHASE1.md)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Uploaded / cloned project sources survive restarts
+      - ./Backend/uploads:/app/uploads
+
+  frontend:
+    build: ./Frontend
+    container_name: cloudforge-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: http://localhost:5000/api
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend

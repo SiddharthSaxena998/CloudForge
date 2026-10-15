@@ -1,6 +1,8 @@
 const Docker = require('dockerode');
 const net = require('net');
 
+const { limits } = require('../config/limits');
+
 const docker = new Docker();
 
 exports.buildImage = (
@@ -11,6 +13,7 @@ exports.buildImage = (
   buildArgs = {}
 ) =>
   new Promise((resolve, reject) => {
+    const timeoutMs = limits().buildTimeoutMin * 60 * 1000;
     docker.buildImage(
       {
         context: contextDir,
@@ -24,7 +27,14 @@ exports.buildImage = (
         let output = '';
         let settled = false;
 
+        // Kill builds that hang or run forever (closing the stream cancels the build).
+        const timer = setTimeout(() => {
+          try { stream.destroy(); } catch (_) {}
+          fail(new Error(`Build timed out after ${limits().buildTimeoutMin} minutes`));
+        }, timeoutMs);
+
         const fail = (err) => {
+          clearTimeout(timer);
           if (settled) return;
           settled = true;
           reject(err);
@@ -98,6 +108,7 @@ exports.buildImage = (
             } catch (_) {}
           }
 
+          clearTimeout(timer);
           settled = true;
           resolve();
         });
@@ -185,7 +196,31 @@ exports.deleteContainer = async (containerId) => {
   await container.remove({ force: false });
 };
 
+// Under Docker Compose the backend runs in its own network namespace, so asking the OS for a
+// free port would test the wrong machine. APP_PORT_RANGE (e.g. "20000-29999") makes us pick a
+// port that no Docker container on the host is publishing yet.
+const pickPortFromRange = async (range) => {
+  const [min, max] = String(range).split('-').map(Number);
+  if (!Number.isInteger(min) || !Number.isInteger(max) || min > max) {
+    throw new Error(`Invalid APP_PORT_RANGE "${range}" (expected e.g. 20000-29999)`);
+  }
+  const containers = await docker.listContainers({ all: true });
+  const used = new Set(
+    containers.flatMap((c) => (c.Ports || []).map((p) => p.PublicPort).filter(Boolean))
+  );
+  for (let i = 0; i < 100; i += 1) {
+    const port = min + Math.floor(Math.random() * (max - min + 1));
+    if (!used.has(port)) return port;
+  }
+  throw new Error('No free port left in APP_PORT_RANGE');
+};
+
 exports.getFreePort = () =>
+  process.env.APP_PORT_RANGE
+    ? pickPortFromRange(process.env.APP_PORT_RANGE)
+    : getOsFreePort();
+
+const getOsFreePort = () =>
   new Promise((resolve, reject) => {
     const server = net.createServer();
     server.once('error', reject);
@@ -196,17 +231,45 @@ exports.getFreePort = () =>
   });
 
 exports.runContainer = async (image, name, envVars, hostPort, containerPort) => {
+  const l = limits();
+  const memory = l.containerMemoryMB * 1024 * 1024;
+
   const container = await docker.createContainer({
     Image: image,
     name,
     Env: Object.entries(envVars || {}).map(([key, value]) => `${key}=${value}`),
     ExposedPorts: { [`${containerPort}/tcp`]: {} },
+    Labels: { 'cloudforge.managed': 'true' },
     HostConfig: {
       PortBindings: {
-        [`${containerPort}/tcp`]: [{ HostPort: String(hostPort) }],
+        [`${containerPort}/tcp`]: [{ HostIp: l.containerBindHost, HostPort: String(hostPort) }],
       },
+      // --- sandbox limits: one user's app must not starve or attack the host ---
+      Memory: memory,
+      MemorySwap: memory,                           // no swap: hard memory cap
+      NanoCpus: Math.round(l.containerCpus * 1e9),  // e.g. 0.5 CPU
+      PidsLimit: l.containerPids,                   // stops fork bombs
+      Privileged: false,
+      SecurityOpt: ['no-new-privileges:true'],
+      CapDrop: ['NET_RAW', 'MKNOD', 'SETFCAP', 'AUDIT_WRITE'],
+      LogConfig: { Type: 'json-file', Config: { 'max-size': '10m', 'max-file': '3' } },
     },
   });
   await container.start();
   return { container, id: container.id };
+};
+
+exports.removeImage = async (tag) => {
+  if (!tag) return;
+  try {
+    await docker.getImage(tag).remove({ force: false });
+  } catch (_) {
+    // image still in use, or already gone: both are fine
+  }
+};
+
+/** Remove dangling (<none>) images left behind by rebuilds. Returns reclaimed bytes. */
+exports.pruneDanglingImages = async () => {
+  const result = await docker.pruneImages({ filters: { dangling: ['true'] } });
+  return result?.SpaceReclaimed || 0;
 };
