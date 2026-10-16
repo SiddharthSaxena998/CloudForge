@@ -214,9 +214,12 @@ export async function loadResource(r: Resource): Promise<void> {
       const { data } = await apiClient.get(`/deployments/${id}/logs`);
       const logs = rawList<LogLine>(data, "logs");
 
-      dataStore.hydrate((s) => ({
-        logs: { ...s.logs, [id]: logs },
-      }));
+      // Keep live lines that arrived after this snapshot was taken (merge by id)
+      dataStore.hydrate((s) => {
+        const known = new Set(logs.map((l) => l.id));
+        const newer = (s.logs[id] ?? []).filter((l) => l.id && !known.has(l.id));
+        return { logs: { ...s.logs, [id]: [...logs, ...newer] } };
+      });
       return;
     }
   }

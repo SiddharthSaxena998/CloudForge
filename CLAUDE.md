@@ -35,7 +35,10 @@ Fire-and-forget (no job queue yet). Logs are stored in the Log collection.
 Done: auth+RBAC, projects (upload/GitHub), env vars, in-browser file editor, Docker deploy,
 container stats broadcast over Socket.IO (backend), auto public link (Cloudflare quick tunnel),
 Phase 0 security hardening (see below).
-NOT done: frontend socket.io-client (live metrics UI), live log streaming (emitLog only saves to DB),
+Live (WebSockets): deployment logs stream line by line (`deployment-log`, `deployment-status`) and
+CPU/memory stream every ~3 s (`container-stats-update`) to the dashboard (`src/lib/live.ts`,
+`src/components/live-metrics.tsx`). Rooms are owner-scoped: `user-<id>`, `deployment-<id>` (checked).
+NOT done:
 Kubernetes, BullMQ/Redis queue, GitHub OAuth, per-user quotas, container resource limits.
 
 ## Phase 0 (security) — done in this patch

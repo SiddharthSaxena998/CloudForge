@@ -28,6 +28,7 @@ logSchema.set('toJSON', {
   versionKey: false,
   transform(_doc, ret) {
     return {
+      id: String(ret._id),
       time: new Date(ret.timestamp).toISOString().slice(11, 19), // HH:MM:SS (UTC)
       level: ret.level,
       text: ret.message,

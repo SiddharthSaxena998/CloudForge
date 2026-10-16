@@ -1,11 +1,12 @@
 import { RemoteGate } from "@/components/remote-gate";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Copy } from "lucide-react";
 import { EmptyState, PageShell } from "@/components/page-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/api";
+import { useLiveLogs, useSocketConnected } from "@/lib/live";
 import { useStore, type LogLevel } from "@/lib/store";
 
 export const Route = createFileRoute("/_shell/logs/$deploymentId")({
@@ -41,6 +42,18 @@ function LogsView({ deploymentId }: { deploymentId: string }) {
   const project = useStore((s) => s.projects.find((p) => p.id === deployment?.projectId));
   const logs = useStore((s) => s.logs[deploymentId] ?? []);
   const [copied, setCopied] = useState(false);
+  const socketUp = useSocketConnected();
+  const boxRef = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
+
+  // Live stream: new log lines and status changes arrive over the WebSocket
+  useLiveLogs(deploymentId);
+
+  // Follow the newest line, unless the user scrolled up to read something
+  useEffect(() => {
+    const el = boxRef.current;
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+  }, [logs.length]);
 
   if (!deployment) {
     return (
@@ -50,7 +63,8 @@ function LogsView({ deploymentId }: { deploymentId: string }) {
     );
   }
 
-  const connected = deployment.status === "building" || deployment.status === "running";
+  // "Live" = socket is connected; otherwise the page falls back to polling while building
+  const connected = socketUp;
 
   async function copy() {
     const text = logs.map((l) => `[${l.time}] ${l.level.toUpperCase().padEnd(7)} ${l.text}`).join("\n");
@@ -83,14 +97,21 @@ function LogsView({ deploymentId }: { deploymentId: string }) {
         <StatusBadge status={deployment.status} />
         <span className="font-mono text-xs text-muted-foreground">{deployment.id}</span>
         <span className="ml-auto inline-flex items-center gap-2 text-xs text-muted-foreground">
-          <span className={`h-2 w-2 rounded-full ${connected ? "bg-success" : "bg-neutral-status"}`} />
-          {connected ? "Connected" : "Disconnected"}
+          <span className={`h-2 w-2 rounded-full ${connected ? "animate-pulse bg-success" : "bg-neutral-status"}`} />
+          {connected ? (deployment.status === "building" ? "Live — streaming" : "Live") : "Offline (polling)"}
         </span>
       </div>
-      <div className="overflow-x-auto rounded-md border border-border bg-terminal p-4 font-mono text-xs leading-6">
+      <div
+        ref={boxRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        }}
+        className="max-h-[70vh] overflow-auto rounded-md border border-border bg-terminal p-4 font-mono text-xs leading-6"
+      >
         {logs.length === 0 && <p className="text-terminal-foreground/60">No log output for this deployment yet.</p>}
         {logs.map((l, i) => (
-          <div key={i} className="flex gap-3 whitespace-pre">
+          <div key={l.id ?? i} className="flex gap-3 whitespace-pre">
             <span className="select-none text-terminal-foreground/50">{l.time}</span>
             <span className={levelClass[l.level]}>{l.text}</span>
           </div>

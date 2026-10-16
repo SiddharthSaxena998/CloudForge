@@ -22,6 +22,7 @@ const { detectFramework } = require('../utils/frameworkDetector');
 const { startTunnel, stopTunnel } = require('../utils/tunnel');
 const Semaphore = require('../utils/semaphore');
 const { limits, isExempt } = require('../config/limits');
+const { emitDeploymentLog, emitDeploymentStatus } = require('../utils/realtime');
 
 // At most N builds at the same time; others wait their turn (see MAX_CONCURRENT_BUILDS)
 const buildSlots = new Semaphore(limits().maxConcurrentBuilds);
@@ -30,12 +31,13 @@ const buildSlots = new Semaphore(limits().maxConcurrentBuilds);
 
 const emitLog = async (deploymentId, level, message) => {
   try {
-    await Log.create({
+    const entry = await Log.create({
       deployment: deploymentId,
       level,
       message,
       timestamp: new Date(),
     });
+    emitDeploymentLog(deploymentId, entry); // live stream to the dashboard
   } catch (error) {
     console.error('Log save failed:', error.message);
   }
@@ -255,6 +257,7 @@ const runDeploymentPipeline = async (deployment, project) => {
 
     deployment.status = 'building';
     await deployment.save();
+    emitDeploymentStatus(deploymentId, 'building');
 
     // Detect framework from actual source, not stale DB metadata.
     const framework = detectFramework(project.sourcePath);
@@ -416,6 +419,7 @@ deployment.finishedAt = new Date();
 deployment.errorMessage = '';
 
 await deployment.save();
+    emitDeploymentStatus(deploymentId, 'running');
 
     // Redeploy = replace: stop older containers of this project so they do not
     // pile up, keep eating the quota, or hold on to old images.
@@ -453,6 +457,7 @@ await deployment.save();
     deployment.errorMessage = error.message;
     deployment.finishedAt = new Date();
     await deployment.save().catch(() => {});
+    emitDeploymentStatus(deploymentId, 'failed');
 
     await setProject({ status: 'failed' }).catch(() => {});
 
@@ -565,6 +570,7 @@ exports.getDeployments = async (req, res, next) => {
         deployment.status = 'stopped';
         deployment.finishedAt = new Date();
         await deployment.save();
+        emitDeploymentStatus(deployment._id, 'stopped');
 
         if (container && container.status !== 'stopped') {
           container.status = 'stopped';

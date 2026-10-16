@@ -56,6 +56,8 @@ export interface AppNotification {
 }
 export type LogLevel = "info" | "warn" | "error" | "success";
 export interface LogLine {
+  /** Mongo id, used to merge history and live lines without duplicates */
+  id?: string;
   time: string;
   level: LogLevel;
   text: string;

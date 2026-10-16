@@ -15,6 +15,7 @@ const User = require('./models/User');
 const Container = require('./models/Container');
 const Deployment = require('./models/Deployment');
 const { startTunnel, stopAllTunnels } = require('./utils/tunnel');
+const { userRoom, deploymentRoom, canJoinDeployment } = require('./utils/realtime');
 
 dotenv.config();
 validateEnv();
@@ -53,12 +54,27 @@ global.io = io;
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  socket.on('join-deployment', (deploymentId) => {
-    socket.join(`deployment-${deploymentId}`);
+  // Live logs: only the deployment's owner (or an admin) may listen.
+  // The optional ack lets the client know when it is safe to (re)load history.
+  socket.on('join-deployment', async (deploymentId, ack) => {
+    let ok = false;
+    try {
+      ok = await canJoinDeployment(socket.user, deploymentId);
+      if (ok) await socket.join(deploymentRoom(deploymentId));
+    } catch (e) {
+      console.error('join-deployment failed:', e.message);
+    }
+    if (typeof ack === 'function') ack({ ok });
   });
 
-  socket.on('join-containers', () => {
-    socket.join('containers');
+  socket.on('leave-deployment', (deploymentId) => {
+    socket.leave(deploymentRoom(deploymentId));
+  });
+
+  // Live metrics: every user only receives stats of their own containers.
+  socket.on('join-containers', (ack) => {
+    socket.join(userRoom(socket.user._id));
+    if (typeof ack === 'function') ack({ ok: true });
   });
 
   socket.on('disconnect', () => {

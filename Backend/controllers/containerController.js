@@ -1,6 +1,7 @@
 
 const Container = require("../models/Container");
 const { stopTunnel } = require("../utils/tunnel");
+const { userRoom, deploymentRoom, emitToRoom, emitDeploymentStatus } = require("../utils/realtime");
 const Project = require("../models/Project");
 const Deployment = require("../models/Deployment");
 
@@ -73,28 +74,47 @@ async function updateStats(container, stats) {
   await container.save();
 }
 
-function broadcastStats(container, extra = {}) {
-  if (!global.io) return;
+// projectId -> ownerId (a project never changes owner), so we do not hit the DB every tick
+const ownerCache = new Map();
 
-  const payload = {
-    containerId: String(container._id),
-    cpuUsagePercent: container.cpuUsagePercent ?? 0,
-    memoryUsageMB: container.memoryUsageMB ?? 0,
-    memoryLimitMB: container.memoryLimitMB ?? null,
-    lastCheckedAt: container.lastCheckedAt,
-    status: container.status,
-    ...extra,
-  };
+async function ownerOf(projectId) {
+  const key = String(projectId);
+  if (!ownerCache.has(key)) {
+    const project = await Project.findById(projectId).select("owner").lean();
+    if (!project) return null;
+    ownerCache.set(key, String(project.owner));
+  }
+  return ownerCache.get(key);
+}
 
-  global.io.to("containers").emit("container-stats-update", payload);
+/**
+ * Pushes live CPU/memory to the OWNER's sockets only (room user-<id>) and to
+ * anyone who joined this container's deployment room. Never throws.
+ */
+async function broadcastStats(container, extra = {}) {
+  try {
+    if (!global.io) return;
 
-  const deploymentId =
-    container.deployment?._id || container.deployment;
+    const payload = {
+      containerId: String(container._id),
+      projectId: String(container.project?._id || container.project),
+      cpuUsagePercent: container.cpuUsagePercent ?? 0,
+      memoryUsageMB: container.memoryUsageMB ?? 0,
+      memoryLimitMB: container.memoryLimitMB ?? null,
+      lastCheckedAt: container.lastCheckedAt,
+      status: container.status,
+      ...extra,
+    };
 
-  if (deploymentId) {
-    global.io
-      .to(`deployment-${deploymentId}`)
-      .emit("container-stats-update", payload);
+    const owner = await ownerOf(container.project?._id || container.project);
+    if (owner) emitToRoom(userRoom(owner), "container-stats-update", payload);
+
+    const deploymentId = container.deployment?._id || container.deployment;
+    if (deploymentId) {
+      emitToRoom(deploymentRoom(deploymentId), "container-stats-update", payload);
+    }
+  } catch (error) {
+    console.error("Stats broadcast failed:", error.message);
   }
 }
 
@@ -273,7 +293,8 @@ async function syncProjectStatuses() {
           container.memoryUsageMB = 0;
           container.lastCheckedAt = new Date();
           await container.save();
-          broadcastStats(container, { status: "stopped" });
+          void broadcastStats(container, { status: "stopped" });
+    if (container.deployment) emitDeploymentStatus(container.deployment, "stopped");
         }
       }
     }
@@ -361,7 +382,7 @@ exports.getContainerStats = async (req, res, next) => {
 
     const stats = await getContainerStats(container.containerId);
     await updateStats(container, stats);
-    broadcastStats(container);
+    void broadcastStats(container);
 
     res.json(container);
   } catch (error) {
@@ -383,7 +404,7 @@ exports.startContainerStatsBroadcast = () => {
         try {
           const stats = await getContainerStats(container.containerId);
           await updateStats(container, stats);
-          broadcastStats(container);
+          await broadcastStats(container);
         } catch (error) {
           console.error(
             `Stats failed for container ${container._id}:`,
@@ -401,7 +422,7 @@ exports.startContainerStatsBroadcast = () => {
   };
 
   void poll();
-  return setInterval(() => void poll(), 5000);
+  return setInterval(() => void poll(), Number(process.env.STATS_INTERVAL_MS) || 3000);
 };
 
 exports.deleteContainer = async (req, res, next) => {

@@ -17,6 +17,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
+import { LiveMetrics } from "@/components/live-metrics";
+import { useLiveContainers } from "@/lib/live";
 import { useStore } from "@/lib/store";
 
 export const Route = createFileRoute("/_shell/containers")({
@@ -76,6 +78,9 @@ function ContainersPage() {
   const containers = useStore((s) => s.containers);
   const projects = useStore((s) => s.projects);
 
+  // Live CPU/memory from the WebSocket (updates the table and the chart below)
+  useLiveContainers();
+
   const [query, setQuery] = useState("");
   const [stopping, setStopping] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -101,6 +106,8 @@ function ContainersPage() {
       description="Runtime instances across all projects"
     >
       <RemoteGate resources={["containers", "projects"]}>
+        <LiveMetrics containers={containers} />
+
         <div className="relative mb-3 max-w-sm">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
