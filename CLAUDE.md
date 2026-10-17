@@ -60,3 +60,10 @@ Start with an invite-only beta of 10-20 users.
 - `path.extname('a.tar.gz')` is `.gz` — match full suffix.
 - Never commit `.env`; the previous one was public and must be rotated.
 - Free tunnels: link changes on each restart; Mac must stay on.
+
+## Phase 2 (limits, disk protection, abuse control) — see docs/PHASE2.md
+Backend/config/limits.js (all tunable via .env), utils/diskGuard.js (size/free-disk guards),
+utils/cleanup.js (periodic image/orphan cleanup, started from server.js), zip-bomb guard in
+utils/archive.js, build sandbox limits in utils/docker.js, deploy cooldown/hourly cap in
+deploymentController. docker-compose.hardened.yml = backend behind a docker-socket-proxy (optional).
+Errors created with diskGuard.httpError() carry `expose: true` so error-handler shows their message.

@@ -9,6 +9,7 @@ const safeArchive = require('../utils/archive');
 const git = require('../utils/git');
 const { resolveInside } = require('../utils/pathSafety');
 const { limits, isExempt } = require('../config/limits');
+const { assertDiskSpace, assertSourceSize } = require('../utils/diskGuard');
 const { normalizeGithubUrl, isValidBranch, RESERVED_NAMES } = require('../utils/validators');
 const {
   assertContainerStopped: assertDockerContainerStopped,
@@ -51,6 +52,8 @@ exports.getProjects = async (req, res, next) => {
 
 exports.createProject = async (req, res, next) => {
   const tmpFile = req.file?.path;
+  let createdDir = ''; // source folder made by this request; removed again if the request fails
+  let projectSaved = false;
   try {
     const { name, description = '', repo, repoUrl, branch = '' } = req.body;
     const sourceType = req.body.sourceType === 'upload' ? 'archive' : req.body.sourceType;
@@ -74,6 +77,8 @@ exports.createProject = async (req, res, next) => {
       return res.status(409).json({ message: 'A project with that name already exists.' });
     }
 
+    await assertDiskSpace(UPLOADS_ROOT); // 507 when the host disk is nearly full
+
     let sourcePath = '';
     let archiveName = '';
 
@@ -89,12 +94,15 @@ exports.createProject = async (req, res, next) => {
         return res.status(400).json({ message: 'Invalid branch name.' });
       }
       sourcePath = await git.cloneRepo(cleanUrl, name, branch.trim());
+      createdDir = sourcePath;
+      await assertSourceSize(sourcePath); // 413 + folder removed if the repo is too big
     } else if (sourceType === 'archive') {
       if (!req.file) {
         return res.status(400).json({ message: 'Archive file is required' });
       }
       const dest = path.join(UPLOADS_ROOT, name);
-      await safeArchive.extract(req.file.path, dest);
+      createdDir = dest;
+      await safeArchive.extract(req.file.path, dest); // enforces MAX_SOURCE_MB while unpacking
       sourcePath = dest;
       archiveName = req.file.originalname;
     } else {
@@ -116,14 +124,20 @@ exports.createProject = async (req, res, next) => {
       status: 'stopped', // deploy hone par building -> running hoga
     });
 
+    projectSaved = true;
     res.status(201).json(project);
   } catch (error) {
     if (error.code === 11000) {
+      projectSaved = true; // same-name race: that folder belongs to the other project, keep it
       return res.status(409).json({ message: 'A project with that name already exists.' });
     }
     next(error);
   } finally {
     if (tmpFile) fs.promises.rm(tmpFile, { force: true }).catch(() => {});
+    // failed half-way (bad repo, too big, duplicate name...): do not leave the unpacked source behind
+    if (createdDir && !projectSaved && createdDir.startsWith(UPLOADS_ROOT + path.sep)) {
+      fs.promises.rm(createdDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 };
 

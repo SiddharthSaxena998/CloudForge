@@ -22,6 +22,8 @@ const deploymentSchema = new mongoose.Schema(
 containerPort: { type: Number, default: null },
 deploymentUrl: { type: String, default: '' },
     publicUrl: { type: String, default: '' },
+    // set by the cleanup job once the Docker image of an old deployment has been deleted
+    imageRemoved: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

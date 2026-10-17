@@ -23,6 +23,7 @@ const { startTunnel, stopTunnel } = require('../utils/tunnel');
 const Semaphore = require('../utils/semaphore');
 const { limits, isExempt } = require('../config/limits');
 const { emitDeploymentLog, emitDeploymentStatus } = require('../utils/realtime');
+const { assertDiskSpace } = require('../utils/diskGuard');
 
 // At most N builds at the same time; others wait their turn (see MAX_CONCURRENT_BUILDS)
 const buildSlots = new Semaphore(limits().maxConcurrentBuilds);
@@ -499,6 +500,36 @@ exports.triggerDeployment = async (req, res, next) => {
         message: 'A deployment is already in progress',
       });
     }
+
+    // Abuse control: stop deploy spamming (each deploy = a full docker build)
+    if (!isExempt(req.user)) {
+      const { deployCooldownSec, maxDeploysPerHour } = limits();
+      if (deployCooldownSec) {
+        const last = await Deployment.findOne({ triggeredBy: req.user._id })
+          .sort({ createdAt: -1 })
+          .select('createdAt');
+        const waitSec = last
+          ? Math.ceil(deployCooldownSec - (Date.now() - last.createdAt.getTime()) / 1000)
+          : 0;
+        if (waitSec > 0) {
+          res.set('Retry-After', String(waitSec));
+          return res.status(429).json({ message: `Please wait ${waitSec}s before deploying again.` });
+        }
+      }
+      if (maxDeploysPerHour) {
+        const lastHour = await Deployment.countDocuments({
+          triggeredBy: req.user._id,
+          createdAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) },
+        });
+        if (lastHour >= maxDeploysPerHour) {
+          return res.status(429).json({
+            message: `Deploy limit reached: ${maxDeploysPerHour} deployments per hour. Try again later.`,
+          });
+        }
+      }
+    }
+
+    await assertDiskSpace(path.resolve(__dirname, '..', 'uploads')); // 507 when the host disk is nearly full
 
     // Quota: running containers per user (this project's own containers get replaced, so not counted)
     if (!isExempt(req.user)) {

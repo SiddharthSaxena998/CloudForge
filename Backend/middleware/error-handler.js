@@ -13,6 +13,11 @@ const errorHandler = (err, req, res, next) => {
     return res.status(400).json({ message: err.message });
   }
 
+  // Deliberate errors made with httpError(): the message is meant for the user
+  if (err.expose && err.statusCode) {
+    return res.status(err.statusCode).json({ message: err.message });
+  }
+
   if (err.name === 'ValidationError') {
     return res.status(400).json({ message: err.message });
   }

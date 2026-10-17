@@ -20,7 +20,17 @@ exports.buildImage = (
         src: ['.'],
         dockerfile,
       },
-      { t: tag, buildargs: buildArgs },
+      {
+        t: tag,
+        buildargs: buildArgs,
+        // sandbox the build itself: a hostile package.json/postinstall must not eat the host
+        memory: limits().buildMemoryMB * 1024 * 1024,
+        memswap: limits().buildMemoryMB * 1024 * 1024,
+        cpuperiod: 100000,
+        cpuquota: Math.round(limits().buildCpus * 100000),
+        rm: true,
+        forcerm: true, // always delete intermediate containers, even when the build fails
+      },
       (error, stream) => {
         if (error) return reject(error);
 
@@ -259,12 +269,14 @@ exports.runContainer = async (image, name, envVars, hostPort, containerPort) => 
   return { container, id: container.id };
 };
 
+/** Returns true when the image is gone (removed now or already missing), false when it is still in use. */
 exports.removeImage = async (tag) => {
-  if (!tag) return;
+  if (!tag) return true;
   try {
     await docker.getImage(tag).remove({ force: false });
-  } catch (_) {
-    // image still in use, or already gone: both are fine
+    return true;
+  } catch (error) {
+    return error.statusCode === 404;
   }
 };
 
@@ -273,3 +285,16 @@ exports.pruneDanglingImages = async () => {
   const result = await docker.pruneImages({ filters: { dangling: ['true'] } });
   return result?.SpaceReclaimed || 0;
 };
+
+/** Best-effort: drop build cache older than 24h. Returns reclaimed bytes (0 if unsupported/blocked). */
+exports.pruneBuildCache = () =>
+  new Promise((resolve) => {
+    docker.modem.dial(
+      {
+        path: `/build/prune?filters=${encodeURIComponent(JSON.stringify({ until: ['24h'] }))}`,
+        method: 'POST',
+        statusCodes: { 200: true, 500: 'server error' },
+      },
+      (error, result) => resolve(error ? 0 : result?.SpaceReclaimed || 0)
+    );
+  });

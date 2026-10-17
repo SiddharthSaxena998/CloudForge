@@ -1,0 +1,71 @@
+# CloudForge with a restricted Docker API (Phase 2). Use INSTEAD of docker-compose.yml:
+#   docker compose -f docker-compose.hardened.yml up -d --build
+#
+# The backend no longer mounts /var/run/docker.sock. It talks to a small proxy that only lets
+# through the parts of the Docker API CloudForge needs (containers, images, build) and answers
+# 403 to everything else (exec, volumes, networks, swarm, secrets, ...).
+# NOTE: this narrows the damage of a backend bug, it is NOT a full sandbox: see docs/PHASE2.md.
+services:
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: cloudforge-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"   # create/start/stop/inspect/stats/logs/remove containers
+      IMAGES: "1"       # list/remove/prune images
+      BUILD: "1"        # docker build (+ build cache prune)
+      POST: "1"         # allow write calls (create, start, stop, build, ...)
+      INFO: "1"
+      EXEC: "0"         # no `docker exec`
+      VOLUMES: "0"
+      NETWORKS: "0"
+      SERVICES: "0"
+      SWARM: "0"
+      SECRETS: "0"
+      CONFIGS: "0"
+      PLUGINS: "0"
+      SYSTEM: "0"
+      AUTH: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - internal          # only the backend can reach the proxy; no ports are published
+
+  backend:
+    build: ./Backend
+    container_name: cloudforge-backend
+    restart: unless-stopped
+    env_file: ./Backend/.env
+    environment:
+      PORT: "5000"
+      DOCKER_HOST: tcp://docker-proxy:2375
+      TUNNEL_TARGET_HOST: host.docker.internal
+      APP_PORT_RANGE: "20000-29999"
+    ports:
+      - "5000:5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./Backend/uploads:/app/uploads      # no Docker socket here any more
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - docker-proxy
+    networks:
+      - internal
+      - default
+
+  frontend:
+    build: ./Frontend
+    container_name: cloudforge-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: http://localhost:5000/api
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+
+networks:
+  internal:
+    internal: true      # no route to the internet or the host: proxy is unreachable from outside

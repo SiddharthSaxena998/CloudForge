@@ -179,6 +179,8 @@ const startServer = async () => {
       startContainerStatsBroadcast();
       console.log('Container stats broadcast started (every 5 seconds)');
 
+      require('./utils/cleanup').startCleanupJob();
+
       restoreTunnels().catch((e) => console.error('Tunnel restore failed:', e.message));
     });
   } catch (error) {
