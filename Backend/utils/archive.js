@@ -3,6 +3,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { dirSizeBytes, httpError, MB } = require('./diskGuard');
 const { limits } = require('../config/limits');
+const { findUserDockerfile } = require('./dockerfileSupport');
 
 exports.extract = (archivePath, destDir) => {
   return new Promise((resolve, reject) => {
@@ -123,6 +124,8 @@ const flattenSingleFolder = (destDir) => {
 
 exports.detectFramework = (sourcePath) => {
   try {
+    if (findUserDockerfile(sourcePath)) return 'Dockerfile';
+
     const pkgJsonPath = path.join(
       sourcePath,
       'package.json'

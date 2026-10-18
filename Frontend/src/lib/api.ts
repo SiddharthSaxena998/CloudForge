@@ -127,6 +127,18 @@ export const api = {
   },
 
   // --------------------------------------------------
+  // PROJECT SETTINGS: app port (null = auto-detect)
+  // --------------------------------------------------
+
+  async updateProjectPort(projectId: string, port: number | null) {
+    await apiClient.put(`/projects/${projectId}`, { port });
+
+    await refetch("projects");
+
+    return;
+  },
+
+  // --------------------------------------------------
   // STOP CONTAINER
   // --------------------------------------------------
 
@@ -134,6 +146,26 @@ export const api = {
     await apiClient.post(
       `/containers/${id}/stop`
     );
+
+    await refetch("containers", "deployments", "projects");
+
+    return;
+  },
+
+  async startContainer(id: string) {
+    await apiClient.post(`/containers/${id}/start`, undefined, {
+      timeout: 60000, // the backend waits a moment to see whether the app really came up
+    });
+
+    await refetch("containers", "deployments", "projects");
+
+    return;
+  },
+
+  async restartContainer(id: string) {
+    await apiClient.post(`/containers/${id}/restart`, undefined, {
+      timeout: 60000,
+    });
 
     await refetch("containers", "deployments", "projects");
 

@@ -186,6 +186,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
 
         <TabsContent value="overview" className="mt-4">
           <Overview project={project} />
+          <PortSetting project={project} />
         </TabsContent>
 
         <TabsContent value="env" className="mt-4">
@@ -247,6 +248,57 @@ function Overview({ project }: { project: ProjectRecord }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+/** Which port the app listens on inside its container (used for the public link and health check). */
+function PortSetting({ project }: { project: ProjectRecord }) {
+  const [value, setValue] = useState(project.port == null ? "" : String(project.port));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function save() {
+    const raw = value.trim();
+
+    if (raw !== "" && (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 65535)) {
+      setMessage("Enter a port between 1 and 65535, or leave it empty.");
+      return;
+    }
+
+    setSaving(true);
+    const res = await attempt(api.updateProjectPort(project.id, raw === "" ? null : Number(raw)));
+    setSaving(false);
+
+    if (res.ok) setMessage("Saved. It applies on the next deploy.");
+  }
+
+  return (
+    <div className="mt-4 rounded-md border border-border bg-card p-4">
+      <h3 className="text-sm font-semibold">App port</h3>
+      <p className="mt-1 text-xs text-muted-foreground">
+        The port your app listens on inside its container. Leave empty to detect it automatically
+        (the EXPOSE line of your own Dockerfile, otherwise 3000 for Node, Python and Go, or 80 for
+        static sites). Your app also gets it as the PORT environment variable.
+        {project.framework === "Dockerfile" && " This project uses your own Dockerfile."}
+      </p>
+      <div className="mt-3 flex items-center gap-2">
+        <Input
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setMessage(null);
+          }}
+          inputMode="numeric"
+          placeholder="auto"
+          className="w-28 font-mono"
+          aria-label="App port"
+        />
+        <Button size="sm" onClick={save} disabled={saving}>
+          {saving ? "Saving" : "Save"}
+        </Button>
+        {message && <span className="text-xs text-muted-foreground">{message}</span>}
+      </div>
+    </div>
   );
 }
 

@@ -1,6 +1,7 @@
 
 const Container = require("../models/Container");
-const { stopTunnel } = require("../utils/tunnel");
+const { startTunnel, stopTunnel, getTunnelUrl } = require("../utils/tunnel");
+const { limitsFor, isExempt } = require("../config/limits");
 const { userRoom, deploymentRoom, emitToRoom, emitDeploymentStatus } = require("../utils/realtime");
 const Project = require("../models/Project");
 const Deployment = require("../models/Deployment");
@@ -11,6 +12,8 @@ const {
   getContainerStats,
   getContainerMemoryLimitMB,
   getContainerLogLines,
+  startContainer: startDockerContainer,
+  restartContainer: restartDockerContainer,
   stopContainer: stopDockerContainer,
   deleteContainer: deleteDockerContainer,
 } = require("../utils/docker");
@@ -393,6 +396,119 @@ exports.stopContainer = async (req, res, next) => {
     next(error);
   }
 };
+
+// ---------- start / restart ----------
+
+/** After a (re)start: make sure the app has a public link. Runs in the background (can take ~10 s). */
+async function ensureTunnel(container) {
+  try {
+    if (getTunnelUrl(container._id) && container.publicUrl) return;
+    const tunnel = await startTunnel(container._id, container.hostPort);
+    if (!tunnel.url) return;
+    container.publicUrl = tunnel.url;
+    await container.save();
+    if (container.deployment) {
+      await Deployment.updateOne({ _id: container.deployment }, { $set: { publicUrl: tunnel.url } });
+    }
+    void broadcastStats(container, { status: "running", publicUrl: tunnel.url });
+  } catch (error) {
+    console.error("Public link after start failed:", error.message);
+  }
+}
+
+const friendlyStartError = (error) => {
+  const text = String(error?.message || "");
+  if (/port is already allocated|address already in use/i.test(text)) {
+    return "The app's port is now used by something else. Redeploy the project instead.";
+  }
+  return null;
+};
+
+/** mode "start": stopped -> running. mode "restart": running -> restarted (a stopped app is simply started). */
+const bringUp = (mode) => async (req, res, next) => {
+  try {
+    const container = await findOwnedContainer(req);
+    if (!container) return res.status(404).json({ message: "Container not found" });
+
+    let state;
+    try {
+      state = await getContainerState(container.containerId);
+    } catch (error) {
+      if (error.statusCode === 404) {
+        return res.status(404).json({ message: "The Docker container no longer exists. Redeploy the project." });
+      }
+      throw error;
+    }
+
+    if (mode === "start" && state.running) {
+      return res.status(409).json({ message: "The app is already running." });
+    }
+
+    const wasRunning = state.running;
+    if (!wasRunning) {
+      // it will become a running app: respect the quota and keep one running version per project
+      if (await Container.exists({ project: container.project, status: "running", _id: { $ne: container._id } })) {
+        return res.status(409).json({ message: "Another version of this project is running. Stop it first, or redeploy." });
+      }
+      if (!isExempt(req.user)) {
+        const max = limitsFor(req.user).maxRunningContainers;
+        const otherProjects = await Project.find({ owner: req.user._id, _id: { $ne: container.project } }).distinct("_id");
+        const running = await Container.countDocuments({ project: { $in: otherProjects }, status: "running" });
+        if (running >= max) {
+          return res.status(403).json({
+            message: `Limit reached: you can run ${max} apps at the same time. Stop another app first.`,
+          });
+        }
+      }
+    }
+
+    try {
+      if (wasRunning) await restartDockerContainer(container.containerId);
+      else await startDockerContainer(container.containerId);
+    } catch (error) {
+      const friendly = friendlyStartError(error);
+      if (friendly) return res.status(409).json({ message: friendly });
+      throw error;
+    }
+
+    // give the app a moment; if it dies at once, show why instead of pretending it runs
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const after = await getContainerState(container.containerId);
+    if (!after.running) {
+      let tail = "";
+      try {
+        const lines = await getContainerLogLines(container.containerId, 15);
+        tail = lines.map((l) => l.text).join("\n");
+      } catch (_) {}
+      return res.status(422).json({
+        message: `The app stopped right after starting.${tail ? `\n${tail}` : ""}`.slice(0, 1500),
+      });
+    }
+
+    container.status = "running";
+    container.lastCheckedAt = new Date();
+    await container.save();
+
+    if (container.deployment) {
+      await Deployment.updateOne(
+        { _id: container.deployment },
+        { $set: { status: "running", errorMessage: "", finishedAt: null } }
+      );
+      emitDeploymentStatus(container.deployment, "running");
+    }
+    await Project.updateOne({ _id: container.project }, { $set: { status: "running" } });
+    void broadcastStats(container, { status: "running" });
+
+    void ensureTunnel(container); // link appears a few seconds later via the live stream
+
+    return res.json({ success: true, message: wasRunning ? "App restarted" : "App started" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.startContainer = bringUp("start");
+exports.restartContainer = bringUp("restart");
 
 exports.getContainerStats = async (req, res, next) => {
   try {

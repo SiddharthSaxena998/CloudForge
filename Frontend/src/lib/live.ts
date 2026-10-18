@@ -72,6 +72,8 @@ interface StatsPayload {
   memoryUsageMB?: number;
   memoryLimitMB?: number | null;
   status?: string;
+  /** sent once the public link of a (re)started app is ready */
+  publicUrl?: string;
 }
 
 const KNOWN_STATUS: DeploymentStatus[] = ["running", "building", "failed", "stopped"];
@@ -98,6 +100,7 @@ export function useLiveContainers(): void {
                 cpu,
                 memoryMb: mem,
                 memoryLimitMb: p.memoryLimitMB ?? c.memoryLimitMb,
+                publicUrl: typeof p.publicUrl === "string" ? p.publicUrl : c.publicUrl,
                 status: KNOWN_STATUS.includes(p.status as DeploymentStatus)
                   ? (p.status as DeploymentStatus)
                   : c.status,

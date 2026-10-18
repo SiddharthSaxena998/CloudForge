@@ -3,7 +3,7 @@ import { RemoteGate } from "@/components/remote-gate";
 import { attempt } from "@/lib/attempt";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { Copy, ExternalLink, Globe, ScrollText, Search, Trash2 } from "lucide-react";
+import { Copy, ExternalLink, Globe, Play, RotateCw, ScrollText, Search, Trash2 } from "lucide-react";
 import { PageShell } from "@/components/page-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -84,6 +84,7 @@ function ContainersPage() {
 
   const [query, setQuery] = useState("");
   const [stopping, setStopping] = useState<string | null>(null);
+  const [starting, setStarting] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [logsFor, setLogsFor] = useState<{ id: string; name: string } | null>(null);
 
@@ -268,6 +269,46 @@ function ContainersPage() {
                           <ScrollText className="h-3.5 w-3.5" />
                           Logs
                         </Button>
+
+                        {c.status === "stopped" && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={starting === c.id}
+                            title="Start this app again without rebuilding"
+                            onClick={async () => {
+                              setStarting(c.id);
+                              try {
+                                await attempt(api.startContainer(c.id));
+                              } finally {
+                                setStarting(null);
+                              }
+                            }}
+                          >
+                            <Play className="h-3.5 w-3.5" />
+                            {starting === c.id ? "Starting" : "Start"}
+                          </Button>
+                        )}
+
+                        {c.status === "running" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={starting === c.id}
+                            title="Restart this app (no rebuild)"
+                            onClick={async () => {
+                              setStarting(c.id);
+                              try {
+                                await attempt(api.restartContainer(c.id));
+                              } finally {
+                                setStarting(null);
+                              }
+                            }}
+                          >
+                            <RotateCw className="h-3.5 w-3.5" />
+                            {starting === c.id ? "Restarting" : "Restart"}
+                          </Button>
+                        )}
 
                         <Button
                           size="sm"

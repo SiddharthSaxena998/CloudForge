@@ -171,6 +171,18 @@ exports.stopContainer = async (containerId) => {
   if (info.State?.Running) await container.stop();
 };
 
+exports.startContainer = async (containerId) => {
+  try {
+    await docker.getContainer(containerId).start();
+  } catch (error) {
+    if (error.statusCode !== 304) throw error; // 304 = already running
+  }
+};
+
+exports.restartContainer = async (containerId) => {
+  await docker.getContainer(containerId).restart({ t: 5 });
+};
+
 exports.getContainerState = async (containerId) => {
   const info = await docker.getContainer(containerId).inspect();
   return {

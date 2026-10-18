@@ -24,6 +24,9 @@ const Semaphore = require('../utils/semaphore');
 const { limits, limitsFor, isExempt } = require('../config/limits');
 const { emitDeploymentLog, emitDeploymentStatus } = require('../utils/realtime');
 const { assertDiskSpace } = require('../utils/diskGuard');
+const { GENERATED_MARKER, findUserDockerfile, parseExposedPort, validPort } = require('../utils/dockerfileSupport');
+const { waitForPort } = require('../utils/portCheck');
+const { pullLatest } = require('../utils/git');
 
 // At most N builds at the same time; others wait their turn (see MAX_CONCURRENT_BUILDS)
 const buildSlots = new Semaphore(limits().maxConcurrentBuilds);
@@ -178,7 +181,13 @@ const generateDockerfile = (sourcePath, framework, buildArgNames = []) => {
         `${buildArgDeclarations}\nRUN npm run build`
       )
     : config.text;
-  fs.writeFileSync(dockerfilePath, dockerfileText);
+  // An uploaded archive may contain `Dockerfile` as a symlink (e.g. -> some file of this server):
+  // remove the link first so we never write THROUGH it.
+  fs.rmSync(dockerfilePath, { force: true });
+  fs.writeFileSync(
+    dockerfilePath,
+    `${GENERATED_MARKER} for ${framework}. Regenerated on every deploy; delete this line to use your own Dockerfile.\n${dockerfileText}`
+  );
 
   return {
     dockerfilePath,
@@ -260,14 +269,34 @@ const runDeploymentPipeline = async (deployment, project) => {
     await deployment.save();
     emitDeploymentStatus(deploymentId, 'building');
 
-    // Detect framework from actual source, not stale DB metadata.
-    const framework = detectFramework(project.sourcePath);
-
-    await emitLog(
-      deploymentId,
-      'info',
-      `Detected framework: ${framework}`
-    );
+    // GitHub projects: redeploying should build the newest commit, not the old clone.
+    if (project.sourceType === 'github' && project.branch) {
+      await emitLog(deploymentId, 'info', `Pulling latest commit of branch "${project.branch}"...`);
+      try {
+        const pulled = await pullLatest(project.sourcePath, project.branch);
+        if (pulled.skipped) {
+          await emitLog(
+            deploymentId,
+            'warn',
+            `Skipped pulling new commits: files were edited in the dashboard (kept as they are). Building commit ${pulled.commit}.`
+          );
+        } else if (pulled.updated) {
+          await emitLog(deploymentId, 'success', `Updated ${pulled.before} -> ${pulled.commit}`);
+        } else {
+          await emitLog(deploymentId, 'info', `Already up to date (${pulled.commit})`);
+        }
+        if (pulled.commit) {
+          deployment.commit = pulled.commit;
+          await deployment.save();
+        }
+      } catch (error) {
+        await emitLog(
+          deploymentId,
+          'warn',
+          `Could not pull new commits (${String(error.message).split('\n')[0]}). Building the code that is already here.`
+        );
+      }
+    }
 
     const envVars = (project.envVars || []).reduce(
       (acc, variable) => {
@@ -276,22 +305,59 @@ const runDeploymentPipeline = async (deployment, project) => {
       },
       {}
     );
-    const buildArgs = framework === 'Next.js'
-      ? Object.fromEntries(
-          Object.entries(envVars).filter(([key]) =>
-            /^NEXT_PUBLIC_[A-Z0-9_]+$/.test(key)
+
+    // Port the app listens on: project setting > PORT env var > Dockerfile EXPOSE > framework default
+    const requestedPort = validPort(project.port)
+      ? project.port
+      : validPort(Number(envVars.PORT))
+        ? Number(envVars.PORT)
+        : null;
+
+    let framework;
+    let dockerfilePath;
+    let containerPort;
+    let buildArgs = {};
+
+    const userDockerfile = findUserDockerfile(project.sourcePath);
+
+    if (userDockerfile) {
+      // The user brought their own Dockerfile: build exactly that.
+      framework = 'Dockerfile';
+      const exposed = parseExposedPort(userDockerfile.content);
+      containerPort = requestedPort || exposed || 3000;
+      dockerfilePath = userDockerfile.path;
+
+      await emitLog(
+        deploymentId,
+        'info',
+        `Using your own Dockerfile. App port: ${containerPort} (${
+          requestedPort ? 'from your port setting' : exposed ? 'from EXPOSE' : 'default, no EXPOSE found'
+        })`
+      );
+    } else {
+      // Detect framework from actual source, not stale DB metadata.
+      framework = detectFramework(project.sourcePath);
+
+      await emitLog(deploymentId, 'info', `Detected framework: ${framework}`);
+
+      buildArgs = framework === 'Next.js'
+        ? Object.fromEntries(
+            Object.entries(envVars).filter(([key]) =>
+              /^NEXT_PUBLIC_[A-Z0-9_]+$/.test(key)
+            )
           )
-        )
-      : {};
+        : {};
 
-    const { dockerfilePath, containerPort } =
-      generateDockerfile(project.sourcePath, framework, Object.keys(buildArgs));
+      const generated = generateDockerfile(project.sourcePath, framework, Object.keys(buildArgs));
+      dockerfilePath = generated.dockerfilePath;
+      containerPort = requestedPort || generated.containerPort;
 
-    await emitLog(
-      deploymentId,
-      'info',
-      `Dockerfile generated for ${framework}`
-    );
+      await emitLog(
+        deploymentId,
+        'info',
+        `Dockerfile generated for ${framework}. App port: ${containerPort}`
+      );
+    }
 
     await emitLog(
       deploymentId,
@@ -328,8 +394,10 @@ const runDeploymentPipeline = async (deployment, project) => {
     // Ensure Next.js binds to the container interface.
     if (framework === 'Next.js') {
       envVars.HOSTNAME = '0.0.0.0';
-      envVars.PORT = '3000';
+      envVars.PORT = String(containerPort);
       envVars.NODE_ENV = 'production';
+    } else if (!envVars.PORT) {
+      envVars.PORT = String(containerPort); // Heroku-style: the app can read its port from $PORT
     }
 
     await emitLog(
@@ -398,6 +466,28 @@ const runDeploymentPipeline = async (deployment, project) => {
       memoryUsageMB: 0,
       lastCheckedAt: new Date(),
     });
+
+    // Is the app really answering on that port? Help the user when it is not (wrong port / crash).
+    await emitLog(deploymentId, 'info', `Waiting for the app to answer on port ${containerPort}...`);
+    const probe = await waitForPort(process.env.TUNNEL_TARGET_HOST || '127.0.0.1', hostPort, {
+      isAlive: () => isContainerRunning(containerResult.id),
+    });
+    if (probe.up) {
+      await emitLog(deploymentId, 'success', 'The app is answering.');
+    } else if (!probe.alive) {
+      await emitLog(
+        deploymentId,
+        'warn',
+        'The app stopped right after starting. Open Containers -> Logs to see why.'
+      );
+    } else {
+      await emitLog(
+        deploymentId,
+        'warn',
+        `The app is running but nothing answers on port ${containerPort}. If it listens on another port, ` +
+          'set it in Project -> Overview -> App port and deploy again (Containers -> Logs shows what it prints).'
+      );
+    }
 
     deployment.hostPort = hostPort;
 deployment.containerPort = containerPort;

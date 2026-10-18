@@ -10,6 +10,7 @@ const git = require('../utils/git');
 const { resolveInside } = require('../utils/pathSafety');
 const { limits, limitsFor, isExempt } = require('../config/limits');
 const { assertDiskSpace, assertSourceSize } = require('../utils/diskGuard');
+const { stripMarker, validPort } = require('../utils/dockerfileSupport');
 const { normalizeGithubUrl, isValidBranch, RESERVED_NAMES } = require('../utils/validators');
 const {
   assertContainerStopped: assertDockerContainerStopped,
@@ -156,7 +157,16 @@ exports.updateProject = async (req, res, next) => {
     const project = await findOwned(req);
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
-    const { description, branch, envVars } = req.body; // name rename allowed nahi (domain/folder isi se bante hain)
+    const { description, branch, envVars, port } = req.body; // name rename allowed nahi (domain/folder isi se bante hain)
+    if (port !== undefined) {
+      if (port === null || port === '') {
+        project.port = null; // auto-detect again
+      } else if (validPort(Number(port))) {
+        project.port = Number(port);
+      } else {
+        return res.status(400).json({ message: 'Port must be a whole number between 1 and 65535.' });
+      }
+    }
     if (description !== undefined) project.description = description;
     if (branch !== undefined) project.branch = branch;
     if (envVars !== undefined) {
@@ -310,10 +320,14 @@ exports.saveFileContent = async (req, res, next) => {
     const target = resolveInside(baseDirOf(project), relPath);
     if (!target) return res.status(403).json({ message: 'Invalid file path' });
 
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, content, 'utf-8');
+    // Saving the Dockerfile in the editor means "use MY Dockerfile": drop CloudForge's marker line
+    const isRootDockerfile = path.relative(baseDirOf(project), target) === 'Dockerfile';
+    const toWrite = isRootDockerfile ? stripMarker(content) : content;
 
-    res.json({ path: relPath, content, success: true });
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, toWrite, 'utf-8');
+
+    res.json({ path: relPath, content: toWrite, success: true });
   } catch (error) {
     next(error);
   }

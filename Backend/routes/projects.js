@@ -24,6 +24,8 @@ router.post('/:id/deploy', heavyLimiter, ownershipCheck, deploymentController.tr
 router.get('/:id/files', ownershipCheck, projectController.getProjectFiles);
 router.get('/:id/files/content', ownershipCheck, projectController.getFileContent);
 router.put('/:id/files/content', ownershipCheck, projectController.saveFileContent);
+// the dashboard's editor saves with PUT /:id/files (same handler)
+router.put('/:id/files', ownershipCheck, projectController.saveFileContent);
 
 // Env vars
 router.get('/:id/env', ownershipCheck, projectController.getEnvVars);

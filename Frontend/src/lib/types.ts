@@ -27,6 +27,8 @@ export interface Project {
   name: string;
   description: string;
   framework: string;
+  /** Port the app listens on inside its container; null/absent = auto-detect */
+  port?: number | null;
   status: DeploymentStatus;
   lastDeployedAt: string;
   region: string;

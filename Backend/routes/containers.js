@@ -7,6 +7,8 @@ router.use(authenticate);
 
 router.get('/', containerController.getContainers);
 router.get('/:id/logs', containerController.getContainerLogs);
+router.post('/:id/start', containerController.startContainer);
+router.post('/:id/restart', containerController.restartContainer);
 router.post('/:id/stop', containerController.stopContainer);
 router.delete('/:id', containerController.deleteContainer);
 

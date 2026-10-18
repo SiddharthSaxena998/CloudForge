@@ -21,6 +21,8 @@ const projectSchema = new mongoose.Schema(
     branch: { type: String, default: '' },
     sourcePath: { type: String, default: '' },
     framework: { type: String, default: '' },
+    // port the app listens on inside its container; null = auto (EXPOSE / framework default)
+    port: { type: Number, default: null, min: 1, max: 65535 },
     region: { type: String, default: 'ap-south-1' },
     envVars: { type: [envVarSchema], default: [] },
     status: {
