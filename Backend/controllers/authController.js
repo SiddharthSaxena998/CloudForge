@@ -1,10 +1,32 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
+const Project = require('../models/Project');
+const Container = require('../models/Container');
+const Deployment = require('../models/Deployment');
 const { isValidEmail } = require('../utils/validators');
+const { limitsFor, isExempt } = require('../config/limits');
+
+// Optional invite code: when SIGNUP_CODE is set in .env, only people who know it can register.
+const signupCode = () => String(process.env.SIGNUP_CODE || '').trim();
+const safeEqual = (a, b) => {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
+/** Public: lets the sign-up form know whether to ask for an invite code. */
+exports.getConfig = (req, res) => {
+  res.json({ inviteRequired: Boolean(signupCode()) });
+};
 
 exports.register = async (req, res, next) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, inviteCode } = req.body;
+
+    if (signupCode() && !safeEqual(typeof inviteCode === 'string' ? inviteCode.trim() : '', signupCode())) {
+      return res.status(403).json({ message: 'Invalid invite code. Ask the administrator for the code.' });
+    }
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Name, email, and password are required' });
@@ -71,6 +93,10 @@ exports.login = async (req, res, next) => {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
+    if (user.status === 'blocked') {
+      return res.status(403).json({ message: 'Your account has been blocked. Contact the administrator.' });
+    }
+
     const token = jwt.sign(
       { _id: user._id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
@@ -90,6 +116,29 @@ exports.getMe = async (req, res, next) => {
       return res.status(404).json({ message: 'User not found' });
     }
     res.json({ user });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** The signed-in user's quota usage (shown on the dashboard). */
+exports.getUsage = async (req, res, next) => {
+  try {
+    const l = limitsFor(req.user);
+    const projectIds = await Project.find({ owner: req.user._id }).distinct('_id');
+    const [running, lastHour] = await Promise.all([
+      Container.countDocuments({ project: { $in: projectIds }, status: 'running' }),
+      Deployment.countDocuments({
+        triggeredBy: req.user._id,
+        createdAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) },
+      }),
+    ]);
+    res.json({
+      unlimited: isExempt(req.user),
+      projects: { used: projectIds.length, max: l.maxProjects },
+      runningApps: { used: running, max: l.maxRunningContainers },
+      deploysPerHour: { used: lastHour, max: l.maxDeploysPerHour },
+    });
   } catch (error) {
     next(error);
   }

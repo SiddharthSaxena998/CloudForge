@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuth } from "@/context/auth";
+import { apiClient } from "@/lib/api-client";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -28,7 +29,13 @@ export const Route = createFileRoute("/login")({
 
 type Mode = "login" | "register";
 
-type FormErrors = { name?: string; email?: string; password?: string; form?: string };
+type FormErrors = {
+  name?: string;
+  email?: string;
+  password?: string;
+  inviteCode?: string;
+  form?: string;
+};
 
 function AuthPage() {
   const { login, register, isAuthenticated, isLoading } = useAuth();
@@ -37,6 +44,8 @@ function AuthPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteRequired, setInviteRequired] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
@@ -47,6 +56,22 @@ function AuthPage() {
     }
   }, [isLoading, isAuthenticated, navigate]);
 
+  // Ask the server whether sign-up needs an invite code (SIGNUP_CODE in Backend/.env)
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .get("/auth/config")
+      .then(({ data }) => {
+        if (!cancelled) setInviteRequired(Boolean((data as { inviteRequired?: boolean }).inviteRequired));
+      })
+      .catch(() => {
+        /* unknown: the server still enforces the code */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const validate = () => {
     const next: FormErrors = {};
     if (mode === "register" && name.trim().length < 2) {
@@ -55,8 +80,11 @@ function AuthPage() {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
       next.email = "Enter a valid email address.";
     }
-    if (password.length < 6) {
-      next.password = "Password must be at least 6 characters.";
+    if (password.length < 8) {
+      next.password = "Password must be at least 8 characters.";
+    }
+    if (mode === "register" && inviteRequired && !inviteCode.trim()) {
+      next.inviteCode = "Enter the invite code you were given.";
     }
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -70,7 +98,7 @@ function AuthPage() {
       if (mode === "login") {
         await login(email, password);
       } else {
-        await register(name, email, password);
+        await register(name, email, password, inviteCode.trim());
       }
       navigate({ to: "/", replace: true });
     } catch (error) {
@@ -179,6 +207,22 @@ function AuthPage() {
                   <p className="text-xs text-destructive">{errors.password}</p>
                 )}
               </div>
+
+              {mode === "register" && inviteRequired && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="inviteCode">Invite code</Label>
+                  <Input
+                    id="inviteCode"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    placeholder="Given by the administrator"
+                    autoComplete="off"
+                  />
+                  {errors.inviteCode && (
+                    <p className="text-xs text-destructive">{errors.inviteCode}</p>
+                  )}
+                </div>
+              )}
 
               {errors.form && (
                 <div className="rounded-sm border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">

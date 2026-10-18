@@ -40,4 +40,17 @@ const limits = () => ({
 
 const isExempt = (user) => Boolean(user && user.role === 'admin');
 
-module.exports = { limits, isExempt };
+const OVERRIDABLE = ['maxProjects', 'maxRunningContainers', 'maxDeploysPerHour'];
+
+/** limits() with this user's admin-set overrides applied (null/missing = default). */
+const limitsFor = (user) => {
+  const base = limits();
+  const overrides = (user && user.limitOverrides) || {};
+  for (const key of OVERRIDABLE) {
+    const v = overrides[key];
+    if (Number.isInteger(v) && v >= 0) base[key] = v;
+  }
+  return base;
+};
+
+module.exports = { limits, limitsFor, isExempt, OVERRIDABLE };

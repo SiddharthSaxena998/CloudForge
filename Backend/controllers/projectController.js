@@ -8,7 +8,7 @@ const fs = require('fs');
 const safeArchive = require('../utils/archive');
 const git = require('../utils/git');
 const { resolveInside } = require('../utils/pathSafety');
-const { limits, isExempt } = require('../config/limits');
+const { limits, limitsFor, isExempt } = require('../config/limits');
 const { assertDiskSpace, assertSourceSize } = require('../utils/diskGuard');
 const { normalizeGithubUrl, isValidBranch, RESERVED_NAMES } = require('../utils/validators');
 const {
@@ -63,7 +63,7 @@ exports.createProject = async (req, res, next) => {
       return res.status(400).json({ message: 'Use 2-39 lowercase letters, numbers or hyphens.' });
     }
     if (!isExempt(req.user)) {
-      const max = limits().maxProjects;
+      const max = limitsFor(req.user).maxProjects;
       if ((await Project.countDocuments({ owner: req.user._id })) >= max) {
         return res.status(403).json({
           message: `Limit reached: you can create up to ${max} projects. Delete one to add another.`,

@@ -8,6 +8,7 @@ const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
 const deploymentRoutes = require('./routes/deployments');
 const notificationRoutes = require('./routes/notifications');
+const adminRoutes = require('./routes/admin');
 const containerRoutes = require('./routes/containers');
 const errorHandler = require('./middleware/error-handler');
 const Notification = require('./models/Notification');
@@ -16,6 +17,7 @@ const Container = require('./models/Container');
 const Deployment = require('./models/Deployment');
 const { startTunnel, stopAllTunnels } = require('./utils/tunnel');
 const { userRoom, deploymentRoom, canJoinDeployment } = require('./utils/realtime');
+const { getUser } = require('./utils/userCache');
 
 dotenv.config();
 validateEnv();
@@ -39,10 +41,13 @@ const io = require('socket.io')(server, {
   }
 });
 
-// Only logged-in users may open a socket: client sends io(url, { auth: { token } })
-io.use((socket, next) => {
+// Only logged-in, non-blocked users may open a socket: client sends io(url, { auth: { token } })
+io.use(async (socket, next) => {
   try {
-    socket.user = jwt.verify(socket.handshake.auth?.token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(socket.handshake.auth?.token, process.env.JWT_SECRET);
+    const user = await getUser(decoded._id);
+    if (!user || user.status === 'blocked') return next(new Error('Unauthorized'));
+    socket.user = { ...decoded, _id: String(user._id), role: user.role };
     next();
   } catch (e) {
     next(new Error('Unauthorized'));
@@ -89,51 +94,7 @@ app.use('/api/deployments', deploymentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/containers', containerRoutes);
 
-// Helper middleware for inline admin routes
-function authenticateInline(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'No token provided' });
-  }
-  try {
-    const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (e) {
-    res.status(401).json({ message: 'Invalid token' });
-  }
-}
-
-function roleCheckAdmin(req, res, next) {
-  if (req.user && req.user.role === 'admin') {
-    next();
-  } else {
-    res.status(403).json({ message: 'Admin access required' });
-  }
-}
-
-// Admin routes (inline for now)
-app.get('/api/admin/users', authenticateInline, roleCheckAdmin, async (req, res, next) => {
-  try {
-    const users = await User.find().select('-password');
-    res.json(users);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.patch('/api/admin/users/:id', authenticateInline, roleCheckAdmin, async (req, res, next) => {
-  try {
-    const { role } = req.body;
-    const user = await User.findByIdAndUpdate(req.params.id, { role }, { new: true }).select('-password');
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    res.json(user);
-  } catch (error) {
-    next(error);
-  }
-});
+app.use('/api/admin', adminRoutes);
 
 // Error handler
 app.use(errorHandler);

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { EmptyState, PageShell } from "@/components/page-shell";
 import { StatusBadge } from "@/components/status-badge";
+import { UsageCard } from "@/components/usage-card";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 import { api, formatDate } from "@/lib/api";
@@ -82,6 +83,7 @@ function DashboardPage() {
       action={<NewProjectButton />}
     >
       <RemoteGate resources={["projects", "containers", "deployments"]}>
+      <UsageCard />
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
           <div key={stat.label} className="rounded-md border border-border bg-card p-4">

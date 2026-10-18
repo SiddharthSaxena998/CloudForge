@@ -21,7 +21,7 @@ const { sendNotification } = require('../utils/notify');
 const { detectFramework } = require('../utils/frameworkDetector');
 const { startTunnel, stopTunnel } = require('../utils/tunnel');
 const Semaphore = require('../utils/semaphore');
-const { limits, isExempt } = require('../config/limits');
+const { limits, limitsFor, isExempt } = require('../config/limits');
 const { emitDeploymentLog, emitDeploymentStatus } = require('../utils/realtime');
 const { assertDiskSpace } = require('../utils/diskGuard');
 
@@ -503,7 +503,7 @@ exports.triggerDeployment = async (req, res, next) => {
 
     // Abuse control: stop deploy spamming (each deploy = a full docker build)
     if (!isExempt(req.user)) {
-      const { deployCooldownSec, maxDeploysPerHour } = limits();
+      const { deployCooldownSec, maxDeploysPerHour } = limitsFor(req.user);
       if (deployCooldownSec) {
         const last = await Deployment.findOne({ triggeredBy: req.user._id })
           .sort({ createdAt: -1 })
@@ -533,7 +533,7 @@ exports.triggerDeployment = async (req, res, next) => {
 
     // Quota: running containers per user (this project's own containers get replaced, so not counted)
     if (!isExempt(req.user)) {
-      const max = limits().maxRunningContainers;
+      const max = limitsFor(req.user).maxRunningContainers;
       const otherProjects = await Project.find({
         owner: req.user._id,
         _id: { $ne: project._id },

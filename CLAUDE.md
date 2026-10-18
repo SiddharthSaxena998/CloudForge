@@ -73,3 +73,9 @@ Errors created with diskGuard.httpError() carry `expose: true` so error-handler 
 src/config.ts uses <current origin>/api), gateway (nginx, gateway/nginx.conf: / , /api, /socket.io)
 and tunnel (cloudflared quick tunnel). `./scripts/public-url.sh` prints the link.
 Experimental production dashboard: Frontend/Dockerfile.prod + docker-compose.prod.yml (NITRO_PRESET=node-server).
+
+## Phase 4 (who may use it) — see docs/PHASE4.md
+SIGNUP_CODE invite code (authController.register, GET /auth/config), User.status active|blocked and
+User.limitOverrides, middleware/auth.js now loads role/status from DB (utils/userCache.js, 10 s cache),
+config/limits.js limitsFor(user), controllers/adminController.js + routes/admin.js (block stops the
+user's apps), GET /auth/usage -> Frontend components/usage-card.tsx, admin.tsx (block, limits dialog).

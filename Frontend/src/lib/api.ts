@@ -6,7 +6,7 @@ import {
   type SourceType,
 } from "./store";
 import { refetch } from "./remote";
-import type { Role } from "./types";
+import type { LimitOverrides, Role, UserStatus } from "./types";
 
 const idOf = (x: unknown): string => {
   const o = (x ?? {}) as Record<string, unknown>;
@@ -186,6 +186,32 @@ export const api = {
     await refetch("users");
 
     return;
+  },
+
+  // --------------------------------------------------
+  // ADMIN: UPDATE USER (role, block/unblock, quota overrides)
+  // --------------------------------------------------
+
+  async updateUser(
+    userId: string,
+    patch: {
+      role?: Role;
+      status?: UserStatus;
+      limitOverrides?: Partial<LimitOverrides>;
+    }
+  ): Promise<{ stoppedApps: number }> {
+    const { data } = await apiClient.patch(
+      `/admin/users/${userId}`,
+      patch
+    );
+
+    await refetch("users");
+
+    const stopped = Number(
+      (data as { stoppedApps?: unknown } | null)?.stoppedApps ?? 0
+    );
+
+    return { stoppedApps: Number.isFinite(stopped) ? stopped : 0 };
   },
 };
 
