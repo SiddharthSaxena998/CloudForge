@@ -67,3 +67,9 @@ utils/cleanup.js (periodic image/orphan cleanup, started from server.js), zip-bo
 utils/archive.js, build sandbox limits in utils/docker.js, deploy cooldown/hourly cap in
 deploymentController. docker-compose.hardened.yml = backend behind a docker-socket-proxy (optional).
 Errors created with diskGuard.httpError() carry `expose: true` so error-handler shows their message.
+
+## Phase 3 (public dashboard) — see docs/PHASE3.md
+`docker compose --profile public up -d --build` starts frontend-public (VITE_API_URL=same-origin ->
+src/config.ts uses <current origin>/api), gateway (nginx, gateway/nginx.conf: / , /api, /socket.io)
+and tunnel (cloudflared quick tunnel). `./scripts/public-url.sh` prints the link.
+Experimental production dashboard: Frontend/Dockerfile.prod + docker-compose.prod.yml (NITRO_PRESET=node-server).

@@ -13,6 +13,8 @@ services:
       TUNNEL_TARGET_HOST: host.docker.internal
       # Ports for deployed apps are picked from this range (must not clash with 5000/8080)
       APP_PORT_RANGE: "20000-29999"
+      # one proxy hop (the gateway) sits in front when --profile public is used: use the real visitor IP
+      TRUST_PROXY: "1"
     ports:
       - "5000:5000"
     extra_hosts:
@@ -33,3 +35,46 @@ services:
       - "8080:8080"
     depends_on:
       - backend
+
+  # ---------------------------------------------------------------------------------------------
+  # PUBLIC DASHBOARD (optional):  docker compose --profile public up -d --build
+  # Prints the link with:         ./scripts/public-url.sh
+  # Everything below only starts with `--profile public`; the normal setup above is unchanged.
+  # ---------------------------------------------------------------------------------------------
+
+  # Same dashboard, but it calls the API on its own address (/api) so one public link is enough.
+  frontend-public:
+    build: ./Frontend
+    container_name: cloudforge-frontend-public
+    restart: unless-stopped
+    profiles: ["public"]
+    environment:
+      VITE_API_URL: same-origin
+      # Vite blocks unknown Host headers; allow the trycloudflare.com links
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: ".trycloudflare.com"
+    depends_on:
+      - backend
+
+  # Single entry point: / -> dashboard, /api and /socket.io -> backend (see gateway/nginx.conf)
+  gateway:
+    image: nginx:1.27-alpine
+    container_name: cloudforge-gateway
+    restart: unless-stopped
+    profiles: ["public"]
+    ports:
+      - "8081:80"        # local test of the public setup: http://localhost:8081
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend-public
+
+  # Free Cloudflare quick tunnel to the gateway (no account). The link is printed in its log.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudforge-tunnel
+    restart: unless-stopped
+    profiles: ["public"]
+    command: tunnel --no-autoupdate --url http://gateway:80
+    depends_on:
+      - gateway

@@ -1,0 +1,26 @@
+# EXPERIMENTAL production image of the dashboard (no Vite dev server).
+# Used by docker-compose.prod.yml. Builds the TanStack Start app for a Node server instead of the
+# Cloudflare Workers target that the Lovable config uses by default.
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm install --legacy-peer-deps
+COPY . .
+
+# "same-origin" = the browser talks to <this site>/api (see src/config.ts); baked in at build time
+ARG VITE_API_URL=same-origin
+ENV VITE_API_URL=$VITE_API_URL
+ENV NITRO_PRESET=node-server
+RUN npm run build
+
+# Fail the build early (with a readable message) if the output is not a Node server
+RUN test -f .output/server/index.mjs \
+ && (cat .output/nitro.json 2>/dev/null | grep -q 'node-server' \
+     || (echo "ERROR: build did not use the node-server preset:" && cat .output/nitro.json && exit 1))
+
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 NITRO_HOST=0.0.0.0 NITRO_PORT=8080
+COPY --from=build /app/.output ./.output
+EXPOSE 8080
+CMD ["node", ".output/server/index.mjs"]

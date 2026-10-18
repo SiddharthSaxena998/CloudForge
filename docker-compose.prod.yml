@@ -1,0 +1,12 @@
+# Production dashboard for the public setup (EXPERIMENTAL). Combine with the main file:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile public up -d --build
+# If the frontend-public build fails, send the error; the normal `--profile public` (dev server) still works.
+services:
+  frontend-public:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: same-origin
+    environment:
+      VITE_API_URL: same-origin
