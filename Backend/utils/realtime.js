@@ -53,6 +53,21 @@ async function canJoinDeployment(user, deploymentId) {
   return Boolean(await Project.exists({ _id: deployment.project, owner: user._id }));
 }
 
+/** Returns the Container document if this user owns it (or is admin), else null. */
+async function findContainerForUser(user, containerId) {
+  if (!user || !mongoose.isValidObjectId(containerId)) return null;
+
+  const Container = require('../models/Container');
+  const Project = require('../models/Project');
+
+  const container = await Container.findById(containerId).select('project containerId');
+  if (!container) return null;
+  if (user.role === 'admin') return container;
+
+  const owns = await Project.exists({ _id: container.project, owner: user._id });
+  return owns ? container : null;
+}
+
 module.exports = {
   userRoom,
   deploymentRoom,
@@ -61,4 +76,5 @@ module.exports = {
   emitDeploymentLog,
   emitDeploymentStatus,
   canJoinDeployment,
+  findContainerForUser,
 };

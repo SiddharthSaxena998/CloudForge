@@ -2,6 +2,7 @@ const Docker = require('dockerode');
 const net = require('net');
 
 const { limits } = require('../config/limits');
+const { createDemuxer, createLineSplitter, createBatcher, parseLine } = require('./logStream');
 
 const docker = new Docker();
 
@@ -298,3 +299,73 @@ exports.pruneBuildCache = () =>
       (error, result) => resolve(error ? 0 : result?.SpaceReclaimed || 0)
     );
   });
+
+// ---------- runtime logs (stdout / stderr of a running or stopped app) ----------
+
+/** Feeds a raw Docker log stream (or Buffer) into line callbacks. Returns { end() }. */
+const makeLineReader = (isTty, onLine) => {
+  const out = createLineSplitter((raw) => onLine({ stream: 'stdout', ...parseLine(raw) }));
+  const err = createLineSplitter((raw) => onLine({ stream: 'stderr', ...parseLine(raw) }));
+  const demux = isTty ? null : createDemuxer((c) => out.push(c), (c) => err.push(c));
+  return {
+    push: (chunk) => (demux ? demux.push(chunk) : out.push(chunk)),
+    end: () => {
+      out.flush();
+      err.flush();
+    },
+  };
+};
+
+/** Last `tail` lines as an array of { stream, ts, text } (no streaming). */
+exports.getContainerLogLines = async (containerId, tail = 200) => {
+  const container = docker.getContainer(containerId);
+  const info = await container.inspect();
+  const buffer = await container.logs({ follow: false, stdout: true, stderr: true, timestamps: true, tail });
+  const lines = [];
+  const reader = makeLineReader(Boolean(info.Config?.Tty), (l) => lines.push(l));
+  reader.push(Buffer.isBuffer(buffer) ? buffer : Buffer.from(String(buffer)));
+  reader.end();
+  return lines.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+};
+
+/**
+ * Follows the output of a container. onLines(batch) gets arrays of { stream, ts, text } a few times
+ * per second; onEnd() fires when the container stops. Resolves to stop() once the stream is open.
+ */
+exports.followContainerLogs = async (containerId, { tail = 200 } = {}, onLines, onEnd) => {
+  const container = docker.getContainer(containerId);
+  const info = await container.inspect();
+  const stream = await container.logs({
+    follow: true,
+    stdout: true,
+    stderr: true,
+    timestamps: true,
+    tail,
+  });
+
+  const batcher = createBatcher({ onBatch: onLines });
+  const reader = makeLineReader(Boolean(info.Config?.Tty), (line) => batcher.add(line));
+  let finished = false;
+
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    reader.end();
+    batcher.flush();
+    batcher.stop();
+    if (onEnd) onEnd();
+  };
+
+  stream.on('data', (chunk) => reader.push(chunk));
+  stream.on('end', finish);
+  stream.on('close', finish);
+  stream.on('error', finish);
+
+  return () => {
+    finished = true;
+    batcher.stop();
+    try {
+      stream.destroy();
+    } catch (_) {}
+  };
+};

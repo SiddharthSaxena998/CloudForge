@@ -10,6 +10,7 @@ const {
   getContainerState,
   getContainerStats,
   getContainerMemoryLimitMB,
+  getContainerLogLines,
   stopContainer: stopDockerContainer,
   deleteContainer: deleteDockerContainer,
 } = require("../utils/docker");
@@ -128,6 +129,27 @@ async function findOwnedContainer(req) {
     project: { $in: projects.map((project) => project._id) },
   });
 }
+
+/** GET /api/containers/:id/logs?tail=300 - snapshot of the app's stdout/stderr (works without WebSockets). */
+exports.getContainerLogs = async (req, res, next) => {
+  try {
+    const container = await findOwnedContainer(req);
+    if (!container) return res.status(404).json({ message: "Container not found" });
+
+    const tail = Math.min(1000, Math.max(1, parseInt(req.query.tail, 10) || 200));
+    try {
+      const lines = await getContainerLogLines(container.containerId, tail);
+      res.json({ lines });
+    } catch (error) {
+      if (error.statusCode === 404) {
+        return res.json({ lines: [], message: "The Docker container no longer exists." });
+      }
+      throw error;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
 
 exports.getContainers = async (req, res, next) => {
   try {

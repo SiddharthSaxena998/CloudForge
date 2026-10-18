@@ -3,7 +3,7 @@ import { RemoteGate } from "@/components/remote-gate";
 import { attempt } from "@/lib/attempt";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { Copy, ExternalLink, Globe, Search, Trash2 } from "lucide-react";
+import { Copy, ExternalLink, Globe, ScrollText, Search, Trash2 } from "lucide-react";
 import { PageShell } from "@/components/page-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { LiveMetrics } from "@/components/live-metrics";
+import { RuntimeLogsDialog } from "@/components/runtime-logs-dialog";
 import { useLiveContainers } from "@/lib/live";
 import { useStore } from "@/lib/store";
 
@@ -84,6 +85,7 @@ function ContainersPage() {
   const [query, setQuery] = useState("");
   const [stopping, setStopping] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [logsFor, setLogsFor] = useState<{ id: string; name: string } | null>(null);
 
   const q = query.trim().toLowerCase();
 
@@ -107,6 +109,12 @@ function ContainersPage() {
     >
       <RemoteGate resources={["containers", "projects"]}>
         <LiveMetrics containers={containers} />
+
+        <RuntimeLogsDialog
+          containerId={logsFor?.id ?? null}
+          containerName={logsFor?.name ?? ""}
+          onClose={() => setLogsFor(null)}
+        />
 
         <div className="relative mb-3 max-w-sm">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -249,6 +257,16 @@ function ContainersPage() {
                             Local
                             <ExternalLink className="h-3.5 w-3.5" />
                           </a>
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="App output (stdout / stderr)"
+                          onClick={() => setLogsFor({ id: c.id, name: c.name })}
+                        >
+                          <ScrollText className="h-3.5 w-3.5" />
+                          Logs
                         </Button>
 
                         <Button

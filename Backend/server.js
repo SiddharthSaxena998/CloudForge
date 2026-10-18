@@ -16,7 +16,8 @@ const User = require('./models/User');
 const Container = require('./models/Container');
 const Deployment = require('./models/Deployment');
 const { startTunnel, stopAllTunnels } = require('./utils/tunnel');
-const { userRoom, deploymentRoom, canJoinDeployment } = require('./utils/realtime');
+const { userRoom, deploymentRoom, canJoinDeployment, findContainerForUser } = require('./utils/realtime');
+const { followContainerLogs } = require('./utils/docker');
 const { getUser } = require('./utils/userCache');
 
 dotenv.config();
@@ -82,7 +83,48 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack({ ok: true });
   });
 
+  // Runtime logs (stdout/stderr of a deployed app): owner or admin only, a few views per socket.
+  const logStreams = new Map(); // container id -> stop()
+  const stopLogStream = (id) => {
+    const stop = logStreams.get(id);
+    if (stop) stop();
+    logStreams.delete(id);
+  };
+
+  socket.on('join-container-logs', async (containerId, ack) => {
+    const reply = (r) => typeof ack === 'function' && ack(r);
+    const id = String(containerId);
+    try {
+      const container = await findContainerForUser(socket.user, id);
+      if (!container) return reply({ ok: false, message: 'Container not found' });
+
+      stopLogStream(id); // re-joining restarts with a fresh tail
+      if (logStreams.size >= 3) return reply({ ok: false, message: 'Too many log views open (max 3)' });
+
+      logStreams.set(id, () => {}); // reserve the slot while Docker connects
+      const stop = await followContainerLogs(
+        container.containerId,
+        { tail: 200 },
+        (lines) => socket.emit('container-log', { containerId: id, lines }),
+        () => {
+          socket.emit('container-log-end', { containerId: id });
+          logStreams.delete(id);
+        }
+      );
+      if (socket.disconnected || !logStreams.has(id)) stop();
+      else logStreams.set(id, stop);
+      reply({ ok: true });
+    } catch (e) {
+      logStreams.delete(id);
+      console.error('join-container-logs failed:', e.message);
+      reply({ ok: false, message: e.statusCode === 404 ? 'The Docker container no longer exists' : 'Could not read logs' });
+    }
+  });
+
+  socket.on('leave-container-logs', (containerId) => stopLogStream(String(containerId)));
+
   socket.on('disconnect', () => {
+    for (const id of [...logStreams.keys()]) stopLogStream(id);
     console.log('Client disconnected:', socket.id);
   });
 });

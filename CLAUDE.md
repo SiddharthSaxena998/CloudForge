@@ -79,3 +79,10 @@ SIGNUP_CODE invite code (authController.register, GET /auth/config), User.status
 User.limitOverrides, middleware/auth.js now loads role/status from DB (utils/userCache.js, 10 s cache),
 config/limits.js limitsFor(user), controllers/adminController.js + routes/admin.js (block stops the
 user's apps), GET /auth/usage -> Frontend components/usage-card.tsx, admin.tsx (block, limits dialog).
+
+## Runtime logs (app stdout/stderr) — see docs/LIVE.md
+Backend/utils/logStream.js (demux/split/batch, pure), utils/docker.js followContainerLogs +
+getContainerLogLines, socket events join-container-logs / container-log (server.js, owner-checked via
+realtime.findContainerForUser), GET /api/containers/:id/logs. Frontend: lib/container-logs.ts,
+components/runtime-logs-dialog.tsx, "Logs" button on the Containers page.
+Kubernetes is deferred on purpose: only build it when the owner asks.
