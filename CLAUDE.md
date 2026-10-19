@@ -100,3 +100,6 @@ Project.port + PORT env + framework default (deploymentController), utils/portCh
 after container start (warns on wrong port / crash), generateDockerfile removes a symlinked Dockerfile
 before writing, editor save of Dockerfile strips the marker, PUT /projects/:id/files alias route.
 Frontend: "App port" card in projects.$projectId.tsx (api.updateProjectPort).
+
+## Fixed link — see docs/FIXED_LINK.md
+Tailscale Funnel (free) / Cloudflare named tunnel / DuckDNS options; docs only, no code change. Private GitHub repos (githubToken, encrypted with TOKEN_ENC_KEY||JWT_SECRET) were already added by another session, with tests (44 pass in shim).
